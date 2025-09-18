@@ -1,0 +1,55 @@
+npm create vite@latest frontend -- --template react
+npm install
+
+npm i -D tailwindcss @tailwindcss/vite
+
+npm install @tanstack/react-query axios @headlessui/react @heroicons/react react-router-dom react-icons
+npm install react-hook-form
+
+
+UI Design Philosophy (Expert Perspective)
+User-Centric: Admins need quick access to issuance, search, and verification. Keep it intuitive with a sidebar nav, clear forms, and responsive design (mobile-friendly).
+Scalable Structure: Use reusable components (e.g., buttons, tables) to avoid repetition. Separate concerns: pages for routes, components for UI pieces.
+Tech Alignment: Leverage Tailwind for styling, Headless UI for accessibility, React Router for navigation, and React Query for data handling.
+Security & Compliance: Include placeholders for auth checks, audit trails, and W3C VC compliance visuals.
+Milestone Focus: Start with auth (login), then dashboard layout, and key features (templates, degrees). Build iteratively.
+Key Pages to Build (Aligned with README)
+Based on the README's features and data flow:
+
+Login (Auth): Email/password form with JWT handling. (Public access.)
+Dashboard (Home): Overview with stats (e.g., issued degrees count) and quick links. (Admin-only.)
+Templates: Download a CSV template; upload filled CSV for preview. (Admin.)
+Degrees: List/search issued degrees with filters (name, status); view details/download. (Admin.)
+Verification: Public page to verify a degree by hash/JSON. (Public.)
+Profile/Settings (Optional): User profile or app settings. (Admin.)
+Flow: Login → Dashboard → Navigate to Templates/Degrees/Verification.
+
+Components to Include
+Layout: Header (logo, user menu), Sidebar (nav links), Footer.
+Forms: Login form, Upload form (with file drag-drop).
+Tables: For degree lists (sortable, paginated).
+Modals/Dialogs: Confirm issuance, view details.
+Buttons/Icons: Using Heroicons/React Icons for consistency.
+Placeholders: For IPFS links, VC hashes (e.g., QR codes later).
+Suggested Additions to Structure
+You've got the folders—let's enhance them:
+
+src/pages/: Add Login.jsx, Dashboard.jsx, Templates.jsx, Degrees.jsx, Verification.jsx.
+src/components/: Add Header.jsx, Sidebar.jsx, Table.jsx, Modal.jsx, FormInput.jsx.
+src/hooks/: Add useAuth.jsx (for login state), useDegrees.jsx (for fetching data).
+src/utils/: Already have api.js/constants.js—add helpers like formatDate.js.
+src/lib/: For future (e.g., DID utilities).
+
+
+
+
+
+Flow structure :- 
+
+
+1. Login
+2. Dashboard
+3. Templates
+4. Degrees
+5. Verification
+6. Profile/Settings
