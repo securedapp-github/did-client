@@ -5,6 +5,7 @@
 **DID Client Dashboard** is a secure web application designed for issuing and managing degree certificates as Verifiable Credentials (VCs) anchored on Decentralized Identifier (DID) standards. This project is developed as part of an internship at SecureDApp, a blockchain security company specializing in Web3 solutions.
 
 The dashboard enables authorized administrators (e.g., university staff) to:
+
 - Download predefined degree templates.
 - Upload and validate degree data from CSV/Excel files.
 - Preview and confirm batches of degrees for issuance.
@@ -17,30 +18,36 @@ This system promotes trust and verifiability in educational credentials using bl
 ## Key Features
 
 ### Authentication & Authorization
+
 - Email/password-based login with JWT sessions.
 - Role-based access control (admin-only for issuance).
 - Secure password hashing and basic rate limiting.
 
 ### Template Management
+
 - Download a standardized degree template (CSV/Excel format) with required fields.
 - Upload and parse user-filled templates, with column mapping and validation.
 
 ### Degree Issuance Pipeline
+
 - Preview parsed data in a tabular format before confirmation.
 - Bulk issuance: Sign degrees as VCs using DID keys and store metadata in the database.
 - IPFS integration for storing degree artifacts (e.g., JSON VCs or PDF certificates).
 - Status tracking for each degree (pending, issued, failed).
 
 ### Degree Management
+
 - Search and filter issued degrees by name, email, roll number, etc.
 - Paginated table view with details like issuance date, VC hash, IPFS links.
 - Download or view associated files.
 
 ### Verification Module
+
 - Public-facing verification: Accept a VC hash or JSON to verify signature and resolve DID.
 - Display verification results, including issuer DID and validity status.
 
 ### Security & Compliance
+
 - Audit logs for all issuance and access events.
 - Encryption for sensitive data; plans for key rotation and HSM integration.
 - Adherence to W3C DID and VC standards for interoperability.
@@ -48,6 +55,7 @@ This system promotes trust and verifiability in educational credentials using bl
 ## Tech Stack
 
 ### Frontend
+
 - **React** (with Vite for build tooling) – Modern, component-based UI.
 - **Tailwind CSS** – Utility-first styling for responsive design.
 - **React Query** – For API state management and caching.
@@ -55,6 +63,7 @@ This system promotes trust and verifiability in educational credentials using bl
 - **Headless UI / shadcn/ui** – Accessible UI components.
 
 ### Backend
+
 - **Node.js** with **TypeScript** – Robust, typed server-side development.
 - **Express.js** or **NestJS** – RESTful API framework.
 - **MongoDB** – NoSQL database for flexible document storage (e.g., VC metadata).
@@ -62,6 +71,7 @@ This system promotes trust and verifiability in educational credentials using bl
 - **IPFS** (via Web3.Storage or Pinata) – Decentralized file storage.
 
 ### Additional Tools
+
 - **JWT** for authentication.
 - **Bcrypt** for password hashing.
 - **Helmet, CORS** for security middleware.
@@ -73,6 +83,7 @@ This system promotes trust and verifiability in educational credentials using bl
 ## Architecture
 
 ### High-Level Diagram
+
 ```
 [Frontend (React)]
      |
@@ -89,6 +100,7 @@ This system promotes trust and verifiability in educational credentials using bl
 ```
 
 ### Data Flow
+
 1. Admin logs in and downloads a degree template.
 2. Admin uploads a filled template (CSV/Excel).
 3. Backend parses and validates the file, previews entries.
@@ -97,6 +109,7 @@ This system promotes trust and verifiability in educational credentials using bl
 6. External users can verify a degree by submitting VC data.
 
 ### Data Models (MongoDB Collections)
+
 - **users**: {_id, email, passwordHash, role, createdAt}
 - **degree_templates**: {_id, name, version, fields[], createdBy, createdAt}
 - **degree_batches**: {_id, templateId, uploadedBy, fileMeta, parsedCount, status, createdAt}
@@ -106,44 +119,53 @@ This system promotes trust and verifiability in educational credentials using bl
 ## API Endpoints (Draft)
 
 ### Authentication
+
 - `POST /auth/login` – Login with email/password, returns JWT.
 - `POST /auth/register` – Register new admin (if needed).
 
 ### Templates
+
 - `GET /templates/download` – Download template file.
 - `POST /templates` – Create/upload a new template.
 
 ### Batches & Issuance
+
 - `POST /batches/upload` – Upload CSV/Excel, parse and return preview data.
 - `GET /batches/:id/preview` – Get parsed entries for a batch.
 - `POST /batches/:id/confirm-issue` – Confirm and issue VCs for the batch.
 
 ### Degrees
+
 - `GET /degrees` – List degrees with filters (search, status, pagination).
 - `GET /degrees/:id` – Get details of a specific degree.
 
 ### Verification
+
 - `POST /verify` – Verify a VC by hash/JSON, return verification status.
 
 ### IPFS
+
 - `GET /ipfs/:cid` – Proxy or download file from IPFS (if needed).
 
 ## Setup Instructions
 
 ### Prerequisites
+
 - Node.js (v18+), npm/yarn
 - MongoDB (local or cloud, e.g., MongoDB Atlas)
 - IPFS account (Web3.Storage or Pinata)
 - DID keys (generated via Veramo)
 
 ### Installation
+
 1. Clone the repository:
+
    ```
    git clone <repo-url>
    cd did-client-dashboard
    ```
-
 2. Install dependencies:
+
    ```
    # Frontend
    cd frontend
@@ -153,21 +175,21 @@ This system promotes trust and verifiability in educational credentials using bl
    cd ../backend
    npm install
    ```
-
 3. Set up environment variables:
+
    - Create `.env` files in `frontend/` and `backend/` based on `.env.example`.
    - Examples:
      - Backend: `MONGODB_URI`, `JWT_SECRET`, `IPFS_API_KEY`, `DID_PRIVATE_KEY`
      - Frontend: `REACT_APP_API_BASE_URL`
-
 4. Set up MongoDB:
+
    - Ensure MongoDB is running and accessible.
    - Run migrations/scripts to create collections (if any).
-
 5. Generate DID keys:
-   - Use Veramo CLI or code to generate `did:key` for testing.
 
+   - Use Veramo CLI or code to generate `did:key` for testing.
 6. Run the application:
+
    ```
    # Backend (in separate terminal)
    cd backend
@@ -177,10 +199,12 @@ This system promotes trust and verifiability in educational credentials using bl
    cd frontend
    npm run dev
    ```
+
    - Frontend will run on `http://localhost:3000`.
    - Backend on `http://localhost:5000` (example).
 
 ### Deployment
+
 - Frontend: Deploy to Vercel/Netlify via Git integration.
 - Backend: Deploy to Render/Railway, set environment variables.
 - CI/CD: Use GitHub Actions for automated testing and deployment.
@@ -224,15 +248,3 @@ Follow the existing code style (TypeScript, ESLint). Add tests for new features.
 ## License
 
 This project is proprietary to SecureDApp. All rights reserved.
-
-## Contact
-
-- **Intern Developer**: [Your Name]
-- **Mentor/Guides**: Abhishek Singh (CEO), Himanushu Goutham (CTO)
-- **Group**: X-DID Dashboard (You and Zuhi)
-
-For questions, reach out in the group or via email.
-
----
-
-*This README will be updated as the project progresses. Last updated: 2025-09-18*
