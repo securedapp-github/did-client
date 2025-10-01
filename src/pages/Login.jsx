@@ -53,11 +53,11 @@ const Login = () => {
             <span className="text-white text-xl font-bold">X</span>
           </div>
           <h2 className="mt-4 text-3xl font-extrabold tracking-tight text-gray-900">Welcome Back</h2>
-          <p className="mt-1 text-gray-600 text-sm">Sign in to X-DID Dashboard</p>
+          <p className="mt-1 text-gray-600 text-sm">Sign in to SecureX-DID Client Dashboard</p>
         </div>
 
         <div className="mt-8 rounded-2xl bg-white backdrop-blur-md border border-gray-200 p-6 shadow-sm">
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-6" autoComplete="off">
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
                 Email address
@@ -66,6 +66,9 @@ const Login = () => {
                 id="email"
                 type="email"
                 placeholder="you@example.com"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="none"
                 aria-invalid={errors.email ? 'true' : 'false'}
                 className={`w-full px-4 py-3 rounded-xl bg-white border focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-400 ${errors.email ? 'border-red-500' : 'border-gray-300'}`}
                 {...register('email', {
@@ -94,6 +97,7 @@ const Login = () => {
                   id="password"
                   type="password"
                   placeholder="••••••••"
+                  autoComplete="new-password"
                   className={`w-full px-4 py-3 pr-10 rounded-xl bg-white border focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-400 ${errors.password ? 'border-red-500' : 'border-gray-300'}`}
                   {...register('password', { required: 'Password is required', minLength: { value: 6, message: 'Minimum 6 characters' } })}
                 />

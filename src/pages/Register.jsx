@@ -49,7 +49,7 @@ const Register = () => {
 
       <div className="relative z-10 mx-auto w-full max-w-5xl px-6 py-12 md:py-16">
         <div className="mb-8 text-center">
-          <h2 className="text-3xl font-extrabold tracking-tight text-gray-900">Get started with X-DID Dashboard</h2>
+          <h2 className="text-3xl font-extrabold tracking-tight text-gray-900">SecureX-DID Client Dashboard</h2>
           <p className="mt-1 text-gray-600 text-sm">For Colleges and Universities to issue and verify degrees as Verifiable Credentials</p>
         </div>
 

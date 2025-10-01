@@ -2,6 +2,8 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import Header from '../components/Header';
 import Footer from '../components/Footer';
+import androidIcon from '../assets/android-removebg-preview.png';
+import iosIcon from '../assets/ios-removebg-preview.png';
 
 const Feature = ({ title, desc }) => (
   <div className="bg-white p-6 rounded-lg shadow">
@@ -24,7 +26,7 @@ const Home = () => {
               Issue and Verify Degrees as Verifiable Credentials
             </h1>
             <p className="mt-4 text-gray-600">
-              Build trust in education with decentralized identifiers (DIDs) and verifiable credentials (VCs). The X - DID Client Dashboard helps universities issue, manage, and verify degrees securely.
+              Build trust in education with decentralized identifiers (DIDs) and verifiable credentials (VCs). The SecureX-DID Client Dashboard helps universities issue, manage, and verify degrees securely.
             </p>
             <div className="mt-6 flex flex-col sm:flex-row gap-3">
               <Link to="/login" className="inline-flex justify-center items-center px-5 py-3 rounded-md bg-blue-600 text-white hover:bg-blue-700">
@@ -72,6 +74,64 @@ const Home = () => {
             <li className="bg-white p-6 rounded-lg shadow">Founded in 2023, Bangalore. Recognized by government bodies and industry leaders.</li>
             <li className="bg-white p-6 rounded-lg shadow">Trusted by teams across DeFi, finance, supply chain, and more.</li>
           </ul>
+        </div>
+      </section>
+
+      {/* Mobile Apps CTA with Icons and QR */}
+      <section className="bg-white border-t">
+        <div className="mx-auto w-full max-w-7xl px-4 py-12 md:py-14">
+          <div className="flex flex-col items-center text-center">
+            <h3 className="text-xl md:text-2xl font-semibold text-gray-900">Get the SecureX-DID mobile app</h3>
+            <p className="mt-2 text-sm text-gray-600">Scan the QR or tap an icon to download</p>
+
+            {/* Links with platform icons */}
+            <div className="mt-6 flex items-center gap-10">
+              <a
+                href={"https://play.google.com/store/apps/details?id=your.android.app"}
+                target="_blank"
+                rel="noreferrer"
+                className="flex flex-col items-center hover:opacity-90"
+                aria-label="Download Android app"
+              >
+                <img src={androidIcon} alt="Android" className="h-12 w-auto object-contain" />
+                <span className="mt-2 text-sm text-gray-700">Android</span>
+              </a>
+              <a
+                href={"https://apps.apple.com/app/id0000000000"}
+                target="_blank"
+                rel="noreferrer"
+                className="flex flex-col items-center hover:opacity-90"
+                aria-label="Download iOS app"
+              >
+                <img src={iosIcon} alt="iOS" className="h-12 w-auto object-contain" />
+                <span className="mt-2 text-sm text-gray-700">iOS</span>
+              </a>
+            </div>
+
+            {/* QR codes for quick scan */}
+            <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-8">
+              <div className="flex flex-col items-center">
+                <img
+                  className="h-36 w-36 rounded-md border border-gray-200"
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
+                    'https://play.google.com/store/apps/details?id=your.android.app'
+                  )}`}
+                  alt="Android app QR code"
+                />
+                <span className="mt-2 text-xs text-gray-600">Scan to download for Android</span>
+              </div>
+              <div className="flex flex-col items-center">
+                <img
+                  className="h-36 w-36 rounded-md border border-gray-200"
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
+                    'https://apps.apple.com/app/id0000000000'
+                  )}`}
+                  alt="iOS app QR code"
+                />
+                <span className="mt-2 text-xs text-gray-600">Scan to download for iOS</span>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 

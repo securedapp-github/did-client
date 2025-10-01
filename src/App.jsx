@@ -12,6 +12,7 @@ import Templates from "./pages/Templates";
 import Degrees from "./pages/Degrees";
 import Verification from "./pages/Verification";
 import RequireAuth from "./routes/RequireAuth";
+import AccountCreate from "./pages/AccountCreate";
 
 function App() {
   return (
@@ -51,6 +52,14 @@ function App() {
         element={
           <RequireAuth>
             <Verification />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/account-create"
+        element={
+          <RequireAuth>
+            <AccountCreate />
           </RequireAuth>
         }
       />

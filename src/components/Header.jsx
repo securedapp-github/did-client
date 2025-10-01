@@ -13,7 +13,7 @@ const Header = ({ onMenuClick }) => {
             <Bars3Icon className="w-6 h-6" />
           </button>
         )}
-        <h1 className="text-xl md:text-2xl font-bold text-gray-800">DID Client Dashboard</h1>
+        <h1 className="text-xl md:text-2xl font-bold text-gray-800">SecureX-DID Client Dashboard</h1>
       </div>
       {isAuthenticated ? (
         <div className="flex items-center gap-3">
