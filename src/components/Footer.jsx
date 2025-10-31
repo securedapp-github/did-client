@@ -14,7 +14,7 @@ const Footer = () => {
               href="https://securedapp.ai/"
               target="_blank"
               rel="noreferrer"
-              className="ml-1 font-semibold text-blue-600 hover:underline"
+              className="ml-1 font-semibold text-[#14B87D] hover:underline"
             >
               SecureDApp
             </a>

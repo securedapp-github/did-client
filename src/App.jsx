@@ -10,9 +10,9 @@ import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
 import Templates from "./pages/Templates";
 import Degrees from "./pages/Degrees";
-import Verification from "./pages/Verification";
+import Account from "./pages/Account";
 import RequireAuth from "./routes/RequireAuth";
-import AccountCreate from "./pages/AccountCreate";
+import ForgotPassword from "./pages/ForgotPassword";
 
 function App() {
   return (
@@ -21,6 +21,7 @@ function App() {
       <Route path="/" element={<Home />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
 
       {/* Protected */}
       <Route
@@ -48,18 +49,10 @@ function App() {
         }
       />
       <Route
-        path="/verification"
+        path="/account"
         element={
           <RequireAuth>
-            <Verification />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/account-create"
-        element={
-          <RequireAuth>
-            <AccountCreate />
+            <Account />
           </RequireAuth>
         }
       />
