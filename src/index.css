@@ -1,3 +1,17 @@
 /* Path :- did-client-frontend/src/index.css */
 
 @import "tailwindcss";
+
+@layer base {
+  input[type="password"]::-ms-reveal,
+  input[type="password"]::-ms-clear {
+    display: none;
+  }
+
+  input[type="password"]::-webkit-textfield-decoration-container,
+  input[type="password"]::-webkit-credentials-auto-fill-button {
+    display: none;
+    visibility: hidden;
+    pointer-events: none;
+  }
+}

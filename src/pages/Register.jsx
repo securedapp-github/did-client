@@ -1,6 +1,7 @@
 /* Path: src/pages/Register.jsx */
 
 import React, { useState } from 'react';
+import { FiEye, FiEyeOff } from 'react-icons/fi';
 import { useNavigate, Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import Button from '../components/Button';
@@ -33,6 +34,8 @@ const Register = () => {
   const [otp, setOtp] = useState('');
   const [registeredEmail, setRegisteredEmail] = useState('');
   const [otpInfo, setOtpInfo] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   // Register form submit
   const onSubmit = async (data) => {
@@ -342,30 +345,53 @@ const Register = () => {
                 {/* Password */}
                 <div>
                   <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                  <input
-                    id="password"
-                    type="password"
-                    placeholder="••••••••"
-                    autoComplete="new-password"
-                    className={`w-full px-4 py-3 rounded-xl bg-white border focus:outline-none focus:ring-2 focus:ring-[#14B87D] placeholder-gray-400 ${errors.password ? 'border-red-500' : 'border-gray-300'}`}
-                    {...register('password', { required: 'Password is required', minLength: { value: 6, message: 'Minimum 6 characters' } })}
-                  />
+                  <div className="relative">
+                    <input
+                      id="password"
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="••••••••"
+                      autoComplete="new-password"
+                      className={`w-full px-4 py-3 pr-14 rounded-xl bg-white border focus:outline-none focus:ring-2 focus:ring-[#14B87D] placeholder-gray-400 ${errors.password ? 'border-red-500' : 'border-gray-300'}`}
+                      {...register('password', { required: 'Password is required', minLength: { value: 6, message: 'Minimum 6 characters' } })}
+                    />
+                    <button
+                      type="button"
+                      className="absolute inset-y-0 right-3 flex items-center text-[#14B87D] hover:opacity-90 focus:outline-none"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <FiEye className="h-5 w-5" /> : <FiEyeOff className="h-5 w-5" />}
+                      <span className="sr-only">{showPassword ? 'Hide password' : 'Show password'}</span>
+                    </button>
+                  </div>
                   {errors.password && <p className="mt-1 text-xs text-red-600">{errors.password.message}</p>}
                 </div>
 
                 {/* Confirm Password */}
                 <div>
                   <label htmlFor="confirm" className="block text-sm font-medium text-gray-700 mb-1">Confirm Password</label>
-                  <input
-                    id="confirm"
-                    type="password"
-                    placeholder="••••••••"
-                    className={`w-full px-4 py-3 rounded-xl bg-white border focus:outline-none focus:ring-2 focus:ring-[#14B87D] placeholder-gray-400 ${errors.confirm ? 'border-red-500' : 'border-gray-300'}`}
-                    {...register('confirm', {
-                      required: 'Confirm your password',
-                      validate: (val) => val === watch('password') || 'Passwords do not match',
-                    })}
-                  />
+                  <div className="relative">
+                    <input
+                      id="confirm"
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      placeholder="••••••••"
+                      autoComplete="new-password"
+                      className={`w-full px-4 py-3 pr-14 rounded-xl bg-white border focus:outline-none focus:ring-2 focus:ring-[#14B87D] placeholder-gray-400 ${errors.confirm ? 'border-red-500' : 'border-gray-300'}`}
+                      {...register('confirm', {
+                        required: 'Confirm your password',
+                        validate: (val) => val === watch('password') || 'Passwords do not match',
+                      })}
+                    />
+                    <button
+                      type="button"
+                      className="absolute inset-y-0 right-3 flex items-center text-[#14B87D] hover:opacity-90 focus:outline-none"
+                      onClick={() => setShowConfirmPassword((prev) => !prev)}
+                      aria-label={showConfirmPassword ? 'Hide confirmation password' : 'Show confirmation password'}
+                    >
+                      {showConfirmPassword ? <FiEye className="h-5 w-5" /> : <FiEyeOff className="h-5 w-5" />}
+                      <span className="sr-only">{showConfirmPassword ? 'Hide confirmation password' : 'Show confirmation password'}</span>
+                    </button>
+                  </div>
                   {errors.confirm && <p className="mt-1 text-xs text-red-600">{errors.confirm.message}</p>}
                 </div>
               </div>

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
+import { FiEye, FiEyeOff } from 'react-icons/fi';
 import Button from '../components/Button';
 import RequestQuoteModal from '../components/RequestQuoteModal';
 import CalendarModal from '../components/CalendarModal';
@@ -18,6 +19,7 @@ const Login = () => {
 
   const [quoteOpen, setQuoteOpen] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const bookingUrl = 'https://calendar.app.google/zs4gZVpkKYU92BEM8';
 
   const navigate = useNavigate();
@@ -179,10 +181,10 @@ const Login = () => {
                 <div className="relative">
                   <input
                     id="password"
-                    type="password"
+                    type={showPassword ? 'text' : 'password'}
                     placeholder="••••••••"
                     autoComplete="new-password"
-                    className={`w-full px-4 py-3 pr-10 rounded-xl bg-white border focus:outline-none focus:ring-2 focus:ring-[#14B87D] placeholder-gray-400 ${
+                    className={`w-full px-4 py-3 pr-14 rounded-xl bg-white border focus:outline-none focus:ring-2 focus:ring-[#14B87D] placeholder-gray-400 ${
                       errors.password ? 'border-red-500' : 'border-gray-300'
                     }`}
                     {...register('password', {
@@ -190,6 +192,15 @@ const Login = () => {
                       minLength: { value: 6, message: 'Minimum 6 characters' },
                     })}
                   />
+                  <button
+                    type="button"
+                    className="absolute inset-y-0 right-3 flex items-center text-[#14B87D] hover:opacity-90 focus:outline-none"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <FiEye className="h-5 w-5" /> : <FiEyeOff className="h-5 w-5" />}
+                    <span className="sr-only">{showPassword ? 'Hide password' : 'Show password'}</span>
+                  </button>
                 </div>
                 {errors.password && (
                   <p className="mt-2 text-sm text-red-600 flex items-center">

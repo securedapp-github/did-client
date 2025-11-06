@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { FiEye, FiEyeOff } from 'react-icons/fi';
 import Button from '../components/Button';
 import { sendOtp, verifyOtp } from '../utils/api';
 
@@ -11,6 +12,8 @@ const ForgotPassword = () => {
   const [otp, setOtp] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
 
   const handleSendOtp = async (e) => {
@@ -114,20 +117,42 @@ const ForgotPassword = () => {
                   value={otp}
                   onChange={(e) => setOtp(e.target.value)}
                 />
-                <input
-                  type="password"
-                  placeholder="New Password"
-                  className="w-full px-4 py-3 rounded-xl bg-white/90 border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#14B87D] shadow-sm"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                />
-                <input
-                  type="password"
-                  placeholder="Confirm New Password"
-                  className="w-full px-4 py-3 rounded-xl bg-white/90 border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#14B87D] shadow-sm"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                />
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    placeholder="New Password"
+                    className="w-full px-4 py-3 pr-14 rounded-xl bg-white/90 border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#14B87D] shadow-sm"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="absolute inset-y-0 right-3 flex items-center text-[#14B87D] hover:opacity-90 focus:outline-none"
+                    onClick={() => setShowNewPassword((prev) => !prev)}
+                    aria-label={showNewPassword ? 'Hide new password' : 'Show new password'}
+                  >
+                    {showNewPassword ? <FiEye className="h-5 w-5" /> : <FiEyeOff className="h-5 w-5" />}
+                    <span className="sr-only">{showNewPassword ? 'Hide new password' : 'Show new password'}</span>
+                  </button>
+                </div>
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    placeholder="Confirm New Password"
+                    className="w-full px-4 py-3 pr-14 rounded-xl bg-white/90 border border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#14B87D] shadow-sm"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="absolute inset-y-0 right-3 flex items-center text-[#14B87D] hover:opacity-90 focus:outline-none"
+                    onClick={() => setShowConfirmPassword((prev) => !prev)}
+                    aria-label={showConfirmPassword ? 'Hide confirmation password' : 'Show confirmation password'}
+                  >
+                    {showConfirmPassword ? <FiEye className="h-5 w-5" /> : <FiEyeOff className="h-5 w-5" />}
+                    <span className="sr-only">{showConfirmPassword ? 'Hide confirmation password' : 'Show confirmation password'}</span>
+                  </button>
+                </div>
                 <Button type="submit" disabled={loading}>{loading ? 'Resetting...' : 'Reset Password'}</Button>
               </form>
             )}
