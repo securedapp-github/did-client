@@ -254,13 +254,13 @@ const Dashboard = () => {
       icon: DocumentArrowDownIcon,
       accent: "bg-[#14B87D]/10 text-[#14B87D]",
     },
-    {
-      label: "Pending verifications",
-      value: stats?.pendingVerifications ?? 0,
-      helper: `${formatNumber(stats?.totalVerifications ?? 0)} completed overall`,
-      icon: ShieldCheckIcon,
-      accent: "bg-amber-100 text-amber-600",
-    },
+    // {
+    //   label: "Pending verifications",
+    //   value: stats?.pendingVerifications ?? 0,
+    //   helper: `${formatNumber(stats?.totalVerifications ?? 0)} completed overall`,
+    //   icon: ShieldCheckIcon,
+    //   accent: "bg-amber-100 text-amber-600",
+    // },
   ];
 
   const pendingCount = stats?.pendingVerifications ?? 0;
@@ -269,7 +269,6 @@ const Dashboard = () => {
   const summaryChips = [
     `Latest sync: ${new Date().toLocaleDateString()}`,
     `${formatNumber(downloadCount)} template downloads`,
-    `${formatNumber(pendingCount)} awaiting verification`,
   ];
 
   return (

@@ -8,6 +8,29 @@ import CalendarModal from '../components/CalendarModal';
 import { useAuthContext } from '../context/AuthContext';
 import { loginUser, submitQuote } from '../utils/api';
 
+const extractApiError = (error, fallbackMessage) => {
+  const data = error?.response?.data;
+
+  if (data) {
+    const parts = [];
+
+    if (data.message) parts.push(data.message);
+    if (Array.isArray(data.errors) && data.errors.length) {
+      const detailed = data.errors
+        .map((item) => item?.msg || item?.message || `${item?.param || 'field'} is invalid`)
+        .join(' ');
+      if (detailed) parts.push(detailed);
+    }
+    if (data.error && !parts.includes(data.error)) parts.push(data.error);
+
+    if (parts.length) {
+      return parts.join(' ');
+    }
+  }
+
+  return error?.message || fallbackMessage;
+};
+
 const Login = () => {
   const { register, handleSubmit, formState: { errors } } = useForm({
     defaultValues: { email: '', password: '' },
@@ -37,20 +60,28 @@ const Login = () => {
       };
 
       const res = await loginUser(payload);
-      const token = res.data.token;
+      const body = res?.data || {};
 
-      if (token) {
-        localStorage.setItem('token', token);
-        login(payload.email);
-        const redirectTo = location.state?.from?.pathname || '/dashboard';
-        navigate(redirectTo, { replace: true });
-      } else {
-        throw new Error("No token returned from server");
+      if (!body.success) {
+        throw {
+          response: {
+            data: body,
+          },
+        };
       }
 
+      const token = body?.data?.token;
+      if (!token) {
+        throw new Error('No token returned from server');
+      }
+
+      localStorage.setItem('token', token);
+      login(payload.email);
+      const redirectTo = location.state?.from?.pathname || '/dashboard';
+      navigate(redirectTo, { replace: true });
     } catch (err) {
-      console.error(err);
-      setError(err.response?.data?.message || 'Invalid email or password');
+      console.error('Login error:', err.response?.data || err);
+      setError(extractApiError(err, 'Invalid email or password'));
     } finally {
       setLoading(false);
     }

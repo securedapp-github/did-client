@@ -109,9 +109,10 @@ export const healthCheck = () => api.get("/health-check");
 
 // ====== Degree APIs ======
 
-// Get degrees with pagination - try modern and legacy endpoints
-export const getDegrees = async (page = 1, limit = 20) => {
-  const q = `?page=${page}&limit=${limit}`;
+// Get degrees with pagination - accepts optional filters
+export const getDegrees = async (page = 1, limit = 20, params = {}) => {
+  const query = new URLSearchParams({ page, limit, ...params });
+  const q = `?${query.toString()}`;
   try {
     return await api.get(`/api/degree-upload/degrees${q}`);
   } catch (err) {
@@ -238,6 +239,11 @@ export const getDashboardStats = () => api.get('/api/dashboard');
 
 // Get batch processing status/details (exact per Postman)
 export const getBatchStatus = async (batchId) => api.get(`/api/degree-upload/batch/${batchId}/status`);
+
+export const getBatchDegrees = async (batchId, page = 1, limit = 100) =>
+  api.get(`/api/degree-upload/batch/${batchId}/degrees`, {
+    params: { page, limit },
+  });
 
 // List uploaded templates/history (best-effort across common routes)
 export const listUploads = async () => [];

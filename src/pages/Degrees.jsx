@@ -1,12 +1,13 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Layout from "../components/Layout";
 import PageHeader from "../components/PageHeader";
-import { listDegreeBatches, getBatchStatus, getDegrees as apiGetDegrees } from "../utils/api";
+import { getDegrees as apiGetDegrees } from "../utils/api";
 import { ChartBarIcon, ClockIcon, FunnelIcon } from "@heroicons/react/24/outline";
 
 const Dashboard = () => {
   const [degrees, setDegrees] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [fetchProgress, setFetchProgress] = useState(null);
   const [error, setError] = useState(null);
 
   // Filters and table state
@@ -22,112 +23,186 @@ const Dashboard = () => {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  useEffect(() => {
-    const fetchAllDegreesFromBatches = async () => {
+  const normalizeDegreeRow = useCallback((raw) => {
+    if (!raw || typeof raw !== "object") return {};
+
+    const registrationNumber =
+      raw.registration_number ||
+      raw.registrationNumber ||
+      raw.register_number ||
+      raw.registerNumber ||
+      raw.reg_no ||
+      raw.regNo ||
+      raw.rollNo ||
+      raw.roll ||
+      raw.roll_no ||
+      raw.degree_id ||
+      raw.degreeId ||
+      "";
+
+    const degreeId = raw.degree_id || raw.degreeId || raw.id || "";
+    const batchName = raw.batch_name || raw.batchName || raw.batch || "";
+    const issueDate =
+      raw.issueDate ||
+      raw.createdAt ||
+      raw.updatedAt ||
+      raw.created_at ||
+      raw.updated_at ||
+      null;
+
+    let yearValue =
+      raw.year ||
+      raw.batch_year ||
+      raw.batchYear ||
+      raw.graduation_year ||
+      raw.graduationYear ||
+      "";
+
+    if (!yearValue && typeof batchName === "string") {
+      const match = batchName.match(/(20\d{2}|19\d{2})/);
+      if (match) yearValue = match[1];
+    }
+
+    if (!yearValue && issueDate) {
       try {
-        setLoading(true);
-        setError(null);
-
-        // Ensure authenticated; degrees are per-user via batches API
-        const token = localStorage.getItem('token');
-        if (!token) {
-          setDegrees([]);
-          setError('Sign in to view issued degrees.');
-          return;
-        }
-
-        // 1) Load batches (page 1), then subsequent pages if present
-        const allBatches = [];
-        let page = 1;
-        let pages = 1;
-        const limit = 20;
-        do {
-          const res = await listDegreeBatches(page, limit);
-          const payload = res?.data;
-          // Postman shape: { success, data: { batches: [...], pagination } }
-          const batches = payload?.data?.batches || [];
-          const pg = payload?.data?.pagination || {};
-          pages = Number(pg?.pages || 1);
-          if (Array.isArray(batches)) allBatches.push(...batches);
-          page += 1;
-        } while (page <= pages);
-
-        // 2) For each batch, fetch status to get sample_degrees
-        const degreeRows = [];
-        await Promise.all((allBatches || []).map(async (b) => {
-          try {
-            const id = b.id || b.batch_id || b.batchId;
-            if (!id) return;
-            const st = await getBatchStatus(id);
-            // Postman shape: { success, data: {...} }
-            const data = st?.data?.data || {};
-            const sample = Array.isArray(data?.sample_degrees) ? data.sample_degrees : [];
-            const createdAt = b.created_at || b.createdAt || data?.created_at || data?.createdAt || null;
-            const batchName = b.batch_name || b.batchName || data?.batch_name || data?.batchName || '';
-            sample.forEach((d) => {
-              degreeRows.push({
-                // Keep original fields for downstream mapping
-                ...d,
-                // Provide normalized fallbacks referenced by table helpers
-                student_name: d.student_name,
-                email: d.email || '',
-                course: d.course || d.program || '',
-                registration_number: d.registration_number,
-                degree_id: d.degree_id,
-                verification_status: d.verification_status,
-                issueDate: createdAt,
-                batch_name: batchName,
-              });
-            });
-          } catch (e) {
-            // ignore individual batch errors but continue others
-          }
-        }));
-
-        // Fallback: if no rows collected from batches, try legacy getDegrees
-        if (degreeRows.length === 0) {
-          try {
-            const res2 = await apiGetDegrees(1, 200);
-            let raw = res2?.data;
-            try {
-              if (raw instanceof Blob) {
-                const text = await raw.text();
-                raw = JSON.parse(text);
-              } else if (typeof raw === 'string') {
-                raw = JSON.parse(raw);
-              }
-            } catch {}
-            const list = Array.isArray(raw)
-              ? raw
-              : raw?.data?.degrees || raw?.degrees || raw?.result || [];
-            const mapped = (list || []).map((d) => ({
-              ...d,
-              student_name: d.student_name || d.name || d.recipientName || '',
-              email: d.email || '',
-              course: d.course || d.program || '',
-              registration_number: d.registration_number || d.registrationNumber || '',
-              degree_id: d.degree_id || d.id,
-              verification_status: d.verification_status || d.status,
-              issueDate: d.issueDate || d.createdAt || d.updatedAt || d.created_at || d.updated_at || null,
-              batch_name: d.batch_name || d.batchName || '',
-            }));
-            setDegrees(mapped);
-          } catch (_) {
-            setDegrees([]);
-          }
-        } else {
-          setDegrees(degreeRows);
-        }
-      } catch (err) {
-        const msg = err?.response?.data?.message || err?.message || 'Failed to fetch degrees from batches';
-        setError(msg);
-      } finally {
-        setLoading(false);
+        yearValue = new Date(issueDate).getFullYear().toString();
+      } catch {
+        yearValue = "";
       }
-    };
+    }
 
-    fetchAllDegreesFromBatches();
+    return {
+      ...raw,
+      student_name:
+        raw.student_name ||
+        raw.studentName ||
+        raw.recipientName ||
+        raw.name ||
+        "",
+      email:
+        raw.email ||
+        raw.recipientEmail ||
+        raw.studentEmail ||
+        raw.contactEmail ||
+        "",
+      course: raw.course || raw.program || raw.courseName || "",
+      registration_number: registrationNumber,
+      degree_id: degreeId,
+      verification_status: raw.verification_status || raw.status || raw.upload_status || "",
+      issueDate,
+      batch_name: batchName,
+      year: yearValue,
+      institution_name:
+        raw.institution_name ||
+        raw.institutionName ||
+        raw.institution ||
+        raw.organization ||
+        "",
+    };
   }, []);
+
+  const fetchDegrees = useCallback(async () => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      setDegrees([]);
+      setError("Sign in to view issued degrees.");
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setFetchProgress({ current: 0, total: null, currentPage: 0, totalPages: 0 });
+    setError(null);
+
+    try {
+      const aggregated = [];
+      const limit = 100;
+      let pageCursor = 1;
+      let totalPages = 1;
+      let totalItems = null;
+
+      do {
+        const res = await apiGetDegrees(pageCursor, limit);
+        let payload = res?.data;
+
+        if (payload instanceof Blob) {
+          const text = await payload.text();
+          try {
+            payload = JSON.parse(text);
+          } catch {
+            payload = {};
+          }
+        } else if (typeof payload === "string") {
+          try {
+            payload = JSON.parse(payload);
+          } catch {
+            payload = {};
+          }
+        }
+
+        const envelope = payload?.data || payload || {};
+        const list = Array.isArray(envelope?.degrees)
+          ? envelope.degrees
+          : Array.isArray(envelope?.data?.degrees)
+            ? envelope.data.degrees
+            : Array.isArray(envelope?.result)
+              ? envelope.result
+              : Array.isArray(payload)
+                ? payload
+                : [];
+
+        if (Array.isArray(list)) {
+          list.forEach((item) => aggregated.push(normalizeDegreeRow(item)));
+        }
+
+        const pagination = envelope?.pagination || envelope?.data?.pagination || {};
+        if (totalItems === null) {
+          const totalValue = Number(pagination?.total);
+          if (Number.isFinite(totalValue)) {
+            totalItems = totalValue;
+          }
+        }
+        const pagesValue = Number(
+          pagination?.total_pages ?? pagination?.totalPages ?? pagination?.pages,
+        );
+        if (Number.isFinite(pagesValue) && pagesValue > 0) {
+          totalPages = pagesValue;
+        } else if (Number.isFinite(pagination?.total)) {
+          const computed = Math.ceil(Number(pagination.total) / limit);
+          if (Number.isFinite(computed) && computed > 0) {
+            totalPages = computed;
+          }
+        }
+
+        setFetchProgress({
+          current: aggregated.length,
+          total: totalItems,
+          currentPage: pageCursor,
+          totalPages,
+        });
+
+        pageCursor += 1;
+      } while (pageCursor <= totalPages);
+
+      setDegrees(aggregated);
+    } catch (err) {
+      console.error("Failed to fetch degrees:", err);
+      const msg =
+        err?.response?.data?.message ||
+        err?.message ||
+        "Failed to fetch degrees.";
+      setError(msg);
+      setDegrees([]);
+      setFetchProgress(null);
+    } finally {
+      setLoading(false);
+      setFetchProgress(null);
+    }
+  }, [normalizeDegreeRow]);
+
+  useEffect(() => {
+    fetchDegrees();
+  }, [fetchDegrees]);
 
   // Derive distinct options
   const distinctPrograms = useMemo(() => {
@@ -158,7 +233,6 @@ const Dashboard = () => {
   };
   const getStatus = (d) => {
     const s = d.status || d.verification_status || d.upload_status || "Issued";
-    // Normalize common backend values to UI labels
     if (/completed|issued/i.test(String(s))) return "Issued";
     if (/pending/i.test(String(s))) return "Pending";
     if (/fail/i.test(String(s))) return "Failed";
@@ -179,6 +253,12 @@ const Dashboard = () => {
     return "";
   };
   const getDegreeId = (d) => d.degree_id || d.degreeId || "";
+  const getInstitution = (d) =>
+    d.institution_name ||
+    d.institutionName ||
+    d.institution ||
+    d.organization ||
+    "";
 
   // Filtered + sorted list
   const processed = useMemo(() => {
@@ -202,8 +282,30 @@ const Dashboard = () => {
     // Sort
     rows.sort((a, b) => {
       const dir = sortDir === "asc" ? 1 : -1;
-      const ka = sortKey === "name" ? getName(a) : sortKey === "status" ? getStatus(a) : sortKey === "program" ? getProgram(a) : sortKey === "year" ? getYear(a) : sortKey === "degreeId" ? getDegreeId(a) : getDate(a);
-      const kb = sortKey === "name" ? getName(b) : sortKey === "status" ? getStatus(b) : sortKey === "program" ? getProgram(b) : sortKey === "year" ? getYear(b) : sortKey === "degreeId" ? getDegreeId(b) : getDate(b);
+      const ka =
+        sortKey === "name"
+          ? getName(a)
+          : sortKey === "program"
+            ? getProgram(a)
+            : sortKey === "year"
+              ? getYear(a)
+              : sortKey === "degreeId"
+                ? getDegreeId(a)
+                : sortKey === "institution"
+                  ? getInstitution(a)
+                  : getDate(a);
+      const kb =
+        sortKey === "name"
+          ? getName(b)
+          : sortKey === "program"
+            ? getProgram(b)
+            : sortKey === "year"
+              ? getYear(b)
+              : sortKey === "degreeId"
+                ? getDegreeId(b)
+                : sortKey === "institution"
+                  ? getInstitution(b)
+                  : getDate(b);
       return String(ka || "").localeCompare(String(kb || ""), undefined, { numeric: true }) * dir;
     });
     return rows;
@@ -233,6 +335,28 @@ const Dashboard = () => {
     [degrees]
   );
 
+  const loadingPercent = fetchProgress
+    ? (() => {
+        if (Number.isFinite(fetchProgress?.total) && fetchProgress.total > 0) {
+          return Math.min(
+            100,
+            Math.round((fetchProgress.current / fetchProgress.total) * 100),
+          );
+        }
+        if (
+          Number.isFinite(fetchProgress?.totalPages) &&
+          fetchProgress.totalPages > 0 &&
+          Number.isFinite(fetchProgress?.currentPage)
+        ) {
+          return Math.min(
+            100,
+            Math.round((fetchProgress.currentPage / fetchProgress.totalPages) * 100),
+          );
+        }
+        return null;
+      })()
+    : null;
+
   return (
     <Layout>
       <div className="relative">
@@ -256,7 +380,38 @@ const Dashboard = () => {
             }
           />
 
-          {loading && <div className="rounded-3xl border border-gray-200 bg-white/90 px-6 py-6 text-sm text-gray-600 shadow-sm">Loading degrees…</div>}
+          {loading && (
+            <div className="rounded-3xl border border-gray-200 bg-white/90 px-6 py-6 text-sm text-gray-700 shadow-sm">
+              <div className="font-medium text-gray-900">Loading degrees…</div>
+              {fetchProgress && (
+                <div className="mt-3 space-y-2">
+                  {Number.isFinite(fetchProgress.total) ? (
+                    <div>
+                      Retrieved <strong>{fetchProgress.current}</strong> of {fetchProgress.total} records
+                    </div>
+                  ) : (
+                    <div>
+                      Retrieved <strong>{fetchProgress.current}</strong> records so far
+                      {Number.isFinite(fetchProgress.totalPages) && fetchProgress.totalPages > 0
+                        ? ` (page ${Math.min(fetchProgress.currentPage, fetchProgress.totalPages)} of ${fetchProgress.totalPages})`
+                        : ''}
+                    </div>
+                  )}
+                  {Number.isFinite(loadingPercent) && (
+                    <div>
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
+                        <div
+                          className="h-2 rounded-full bg-[#14B87D] transition-all"
+                          style={{ width: `${Math.max(0, loadingPercent)}%` }}
+                        />
+                      </div>
+                      <div className="mt-1 text-xs text-gray-500">{loadingPercent}% complete</div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           {!loading && error && (
             <div className="rounded-3xl border border-red-200 bg-red-50 px-6 py-6 text-sm text-red-700 shadow-sm">
               {error}
@@ -273,9 +428,6 @@ const Dashboard = () => {
                 <div className="flex flex-wrap gap-2 text-xs font-medium text-gray-700">
                   <span className="inline-flex items-center gap-2 rounded-full border border-[#14B87D]/30 bg-white px-3 py-1">
                     <span className="h-2 w-2 rounded-full bg-[#14B87D]" /> {totalRecords} total records synced
-                  </span>
-                  <span className="inline-flex items-center gap-2 rounded-full border border-[#14B87D]/30 bg-white px-3 py-1">
-                    <span className="h-2 w-2 rounded-full bg-amber-400" /> {pendingCount} awaiting verification
                   </span>
                   <span className="inline-flex items-center gap-2 rounded-full border border-[#14B87D]/30 bg-white px-3 py-1">
                     <span className="h-2 w-2 rounded-full bg-emerald-500" /> {issuedCount} issued credentials
@@ -322,23 +474,6 @@ const Dashboard = () => {
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-500">Status</label>
-                <select
-                  className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm shadow-sm focus:border-[#14B87D] focus:outline-none"
-                  value={status}
-                  onChange={(e) => {
-                    setStatus(e.target.value);
-                    setPage(1);
-                  }}
-                >
-                  {['All', 'Issued', 'Pending', 'Failed', 'Revoked'].map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
                 <label className="text-xs text-gray-500">Course</label>
                 <select
                   className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm shadow-sm focus:border-[#14B87D] focus:outline-none"
@@ -356,7 +491,7 @@ const Dashboard = () => {
                 </select>
               </div>
               <div>
-                <label className="text-xs text-gray-500">Batch</label>
+                <label className="text-xs text-gray-500">Year</label>
                 <select
                   className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm shadow-sm focus:border-[#14B87D] focus:outline-none"
                   value={year}
@@ -422,8 +557,8 @@ const Dashboard = () => {
                     <th className="py-2 cursor-pointer" onClick={() => toggleSort('program')}>Course</th>
                     <th className="py-2 cursor-pointer" onClick={() => toggleSort('degreeId')}>Degree ID</th>
                     <th className="py-2">Registration Number</th>
-                    <th className="py-2">Batch</th>
-                    <th className="py-2 cursor-pointer" onClick={() => toggleSort('status')}>Status</th>
+                    <th className="py-2 cursor-pointer" onClick={() => toggleSort('year')}>Year</th>
+                    <th className="py-2 cursor-pointer" onClick={() => toggleSort('institution')}>Institution</th>
                     <th className="py-2 cursor-pointer" onClick={() => toggleSort('date')}>Date</th>
                   </tr>
                 </thead>
@@ -435,25 +570,14 @@ const Dashboard = () => {
                         <td className="py-3 text-gray-700">{getProgram(d) || '—'}</td>
                         <td className="py-3 text-gray-700">{getDegreeId(d) || '—'}</td>
                         <td className="py-3 text-gray-700">{getRegistrationNumber(d) || '—'}</td>
-                        <td className="py-3 text-gray-700">{d.batch_name || d.batchName || '—'}</td>
-                        <td className="py-3">
-                          <span
-                            className={`text-xs px-2 py-0.5 rounded-full ${String(getStatus(d)).toLowerCase() === 'failed'
-                              ? 'bg-red-100 text-red-700'
-                              : String(getStatus(d)).toLowerCase() === 'pending'
-                                ? 'bg-yellow-100 text-yellow-800'
-                                : 'bg-green-100 text-green-700'
-                            }`}
-                          >
-                            {getStatus(d)}
-                          </span>
-                        </td>
+                        <td className="py-3 text-gray-700">{getYear(d) || '—'}</td>
+                        <td className="py-3 text-gray-700">{getInstitution(d) || '—'}</td>
                         <td className="py-3 text-gray-700">{getDate(d) ? new Date(getDate(d)).toLocaleDateString() : '—'}</td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={7} className="py-6 text-center text-gray-500">No records found</td>
+                      <td colSpan={8} className="py-6 text-center text-gray-500">No records found</td>
                     </tr>
                   )}
                 </tbody>

@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
 import Button from '../components/Button';
 import PageHeader from '../components/PageHeader';
 import Dropzone from '../components/Dropzone';
-import { uploadDegreeBatch, getDegreeTemplate, listUploads, listDegreeBatches, getBatchStatus } from '../utils/api';
+import ProgressBar from '../components/ProgressBar';
+import { uploadDegreeBatch, getDegreeTemplate, listUploads, listDegreeBatches, getBatchStatus, getBatchDegrees } from '../utils/api';
 import { useAuthContext } from '../context/AuthContext';
 
 const Templates = () => {
@@ -11,14 +13,17 @@ const Templates = () => {
   const currentEmail = String(user?.email ?? '').trim().toLowerCase();
   const LS_KEY = currentEmail ? `x_did_uploaded_files:${currentEmail}` : 'x_did_uploaded_files:__anon__';
   const DOWNLOAD_KEY = currentEmail ? `x_did_template_downloads:${currentEmail}` : 'x_did_template_downloads:__anon__';
+  const UPLOAD_SESSION_KEY = currentEmail ? `x_did_upload_session:${currentEmail}` : 'x_did_upload_session:__anon__';
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadError, setUploadError] = useState('');
+  const [uploadPhase, setUploadPhase] = useState(null); // null | uploading | processing | completed
+  const [uploadError, setUploadError] = useState(null);
   const [uploadResult, setUploadResult] = useState(null);
   const [uploadedFiles, setUploadedFiles] = useState([]); // persisted list of uploaded files
   const [downloadHistory, setDownloadHistory] = useState([]);
   const [expanded, setExpanded] = useState({});
+  const [toast, setToast] = useState(null);
   const MAX_HISTORY = 50;
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [downloadHistoryLoaded, setDownloadHistoryLoaded] = useState(false);
@@ -27,9 +32,372 @@ const Templates = () => {
   const [batches, setBatches] = useState([]);
   const [batchesLoading, setBatchesLoading] = useState(false);
   const [batchesError, setBatchesError] = useState('');
+
+  // Restore upload session on mount
+  useEffect(() => {
+    const restoreUploadSession = () => {
+      try {
+        const savedSession = localStorage.getItem(UPLOAD_SESSION_KEY);
+        if (savedSession) {
+          const session = JSON.parse(savedSession);
+          if (session && session.status) {
+            uploadSessionRef.current = session;
+            syncHistoryFromSession(session);
+            setUploadPhase(session.status);
+            setUploadProgress(session.progress || 0);
+            
+            if (session.status === 'processing' || session.status === 'uploading') {
+              setUploading(true);
+              
+              // If we have a batch ID, resume polling
+              if (session.batchId) {
+                activeBatchIdRef.current = session.batchId;
+                scheduleStatusPolling(session.batchId);
+              } else if (session.startedAt) {
+                // Otherwise try to discover the batch
+                startDiscoveryPolling(session.startedAt);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error restoring upload session:', err);
+      }
+    };
+
+    restoreUploadSession();
+
+    // Cleanup on unmount
+    return () => {
+      stopBatchPolling();
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
   const [selectedBatch, setSelectedBatch] = useState(null);
   const [batchStatus, setBatchStatus] = useState(null);
+  const [batchDegrees, setBatchDegrees] = useState([]);
   const [batchStatusLoading, setBatchStatusLoading] = useState(false);
+  const pollTimerRef = useRef(null);
+  const discoveryTimerRef = useRef(null);
+  const activeBatchIdRef = useRef(null);
+  const fallbackStatsRef = useRef(null);
+  const processingStatsRef = useRef(null);
+  const uploadStartRef = useRef(null);
+  const uploadSessionRef = useRef(null);
+  const toastTimerRef = useRef(null);
+  const [processingStats, setProcessingStats] = useState(null);
+
+  const updateProcessingStats = (next) => {
+    const resolved = typeof next === 'function' ? next(processingStatsRef.current) : next;
+    processingStatsRef.current = resolved;
+    setProcessingStats(resolved);
+    
+    // Update progress based on processing stats if we have valid data
+    if (resolved && typeof resolved.processed === 'number' && typeof resolved.total === 'number' && resolved.total > 0) {
+      const progress = Math.min(100, Math.round((resolved.processed / resolved.total) * 100));
+      setUploadProgress(progress);
+      
+      // If we've processed all items, mark as completed
+      if (progress >= 100) {
+        setUploadPhase('completed');
+      }
+    }
+  };
+
+  const previewDegrees = Array.isArray(batchDegrees) ? batchDegrees.slice(0, 6) : [];
+  const hasMoreDegrees = Array.isArray(batchDegrees) && batchDegrees.length > previewDegrees.length;
+
+  const stopStatusPolling = () => {
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  };
+
+  const stopDiscoveryPolling = () => {
+    if (discoveryTimerRef.current) {
+      clearTimeout(discoveryTimerRef.current);
+      discoveryTimerRef.current = null;
+    }
+  };
+
+  const stopBatchPolling = () => {
+    stopStatusPolling();
+    stopDiscoveryPolling();
+    activeBatchIdRef.current = null;
+  };
+
+  const mergeHistoryItems = (existing = {}, incoming = {}) => {
+    const next = { ...existing };
+
+    Object.entries(incoming).forEach(([key, value]) => {
+      if (value === undefined) return;
+
+      if (key === 'summary' || key === 'certificates') {
+        const prevSection = existing[key] || {};
+        next[key] = value === null ? null : { ...prevSection, ...value };
+      } else if (key === 'result' || key === 'errors') {
+        next[key] = Array.isArray(value) ? value : [];
+      } else if (key === 'at') {
+        next[key] = value || existing[key] || Date.now();
+      } else {
+        next[key] = value;
+      }
+    });
+
+    return next;
+  };
+
+  const upsertHistoryEntry = (entry) => {
+    if (!entry) return;
+    const normalized = {
+      ...entry,
+      at: entry.at || Date.now(),
+    };
+
+    setUploadedFiles((prev) => {
+      const list = Array.isArray(prev) ? [...prev] : [];
+      const index = list.findIndex((item) => (
+        (normalized.batchId && item.batchId === normalized.batchId) ||
+        (normalized.sessionId && item.sessionId === normalized.sessionId)
+      ));
+
+      if (index >= 0) {
+        const merged = mergeHistoryItems(list[index], normalized);
+        if (!merged.sessionId && normalized.sessionId) merged.sessionId = normalized.sessionId;
+        if (!merged.batchId && normalized.batchId) merged.batchId = normalized.batchId;
+        list[index] = merged;
+      } else {
+        list.unshift(normalized);
+      }
+
+      list.sort((a, b) => (b.at || 0) - (a.at || 0));
+      return list.slice(0, MAX_HISTORY);
+    });
+  };
+
+  const syncHistoryFromSession = (session) => {
+    if (!session) return;
+    const historyEntry = {
+      sessionId: session.sessionId || session.startedAt || session.lastUpdated,
+      batchId: session.batchId || null,
+      name: session.fileName,
+      size: session.fileSize,
+      at: session.startedAt || session.lastUpdated || Date.now(),
+      status: session.status,
+      progress: typeof session.progress === 'number' ? session.progress : undefined,
+      fileCount: session.fileCount,
+      lastUpdated: session.lastUpdated,
+    };
+
+    if (session.stats) {
+      historyEntry.summary = {
+        total: session.stats.total,
+        success: session.stats.successful ?? session.stats.success,
+        failed: session.stats.failed,
+        skipped: session.stats.skipped,
+        processed: session.stats.processed,
+      };
+    }
+
+    upsertHistoryEntry(historyEntry);
+  };
+
+  const saveUploadSession = (updates, { replace = false } = {}) => {
+    if (!updates) {
+      const existingSession = uploadSessionRef.current;
+      uploadSessionRef.current = null;
+      try {
+        localStorage.removeItem(UPLOAD_SESSION_KEY);
+      } catch {}
+      return existingSession;
+    }
+
+    const base = replace ? {} : (uploadSessionRef.current || {});
+    const nextSession = {
+      ...base,
+      ...updates,
+    };
+
+    if (!nextSession.sessionId) {
+      nextSession.sessionId = nextSession.startedAt || Date.now();
+    }
+
+    uploadSessionRef.current = nextSession;
+    try {
+      localStorage.setItem(UPLOAD_SESSION_KEY, JSON.stringify(nextSession));
+    } catch {}
+    syncHistoryFromSession(nextSession);
+    return nextSession;
+  };
+
+  const resetUploadIndicators = () => {
+    stopBatchPolling();
+    setUploading(false);
+    setUploadPhase(null);
+    setUploadProgress(0);
+    updateProcessingStats(null);
+  };
+
+  const finalizeUpload = ({ toastMessage, toastType = 'success' } = {}) => {
+    // Don't reset indicators immediately, let the effect handle it after showing the toast
+    const message = toastMessage || (toastType === 'success' 
+      ? 'Degrees processed successfully.' 
+      : 'Degree upload update.');
+    
+    setToast({ type: toastType, message });
+    
+    // Set a timer to reset indicators after toast is shown
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    
+    toastTimerRef.current = setTimeout(() => {
+      resetUploadIndicators();
+      saveUploadSession(null);
+      toastTimerRef.current = null;
+    }, 5000); // Match this with your toast auto-hide duration
+  };
+
+  const scheduleStatusPolling = (batchId) => {
+    if (!batchId) return;
+    if (activeBatchIdRef.current === batchId && pollTimerRef.current) return;
+    activeBatchIdRef.current = batchId;
+    stopStatusPolling();
+
+    const pollStatus = async () => {
+      try {
+        const fallback = fallbackStatsRef.current || {};
+        const statusRes = await getBatchStatus(batchId);
+        const statusData = statusRes?.data?.data || statusRes?.data || {};
+        
+        // Get the current time for the session update
+        const now = Date.now();
+        
+        // Get total records from response or fallback
+        const total = Number(statusData?.total_records) || fallback.total || processingStatsRef.current?.total || 0;
+        
+        // Get processed records count
+        const processedValue = Number(statusData?.processed_records) || 0;
+        const successfulValue = Number(statusData?.successful_records) || 0;
+        const failedValue = Number(statusData?.failed_records) || 0;
+        const skippedValue = Number(statusData?.skipped_records) || 0;
+
+        // Calculate progress percentage
+        let progress = 0;
+        if (total > 0) {
+          progress = Math.min(100, Math.round((processedValue / total) * 100));
+        } else if (processedValue > 0) {
+          // If we don't have a total but have processed some, show at least 1% progress
+          progress = Math.min(99, Math.max(1, Math.round(processedValue / 10)));
+        }
+
+        // Update UI with new progress
+        setUploadProgress(progress);
+        setUploadPhase('processing');
+
+        // Update processing stats
+        const nextStats = {
+          total,
+          processed: processedValue,
+          successful: successfulValue,
+          failed: failedValue,
+          skipped: skippedValue,
+        };
+
+        // Update the session in localStorage
+        saveUploadSession({
+          status: 'processing',
+          progress,
+          lastUpdated: now,
+          stats: nextStats,
+        });
+
+        updateProcessingStats(nextStats);
+        fallbackStatsRef.current = nextStats;
+
+        // Check if processing is complete
+        if (progress >= 100 || (total > 0 && processedValue >= total)) {
+          setUploadPhase('completed');
+          finalizeUpload({
+            toastMessage: 'Degree processing completed successfully!',
+            toastType: 'success'
+          });
+          return;
+        }
+      } catch (err) {
+        console.warn('Failed to poll batch status:', err?.message || err);
+        // If we encounter an error, we'll still continue polling in case it's temporary
+      }
+
+      // Continue polling if we still have the same batch ID
+      if (activeBatchIdRef.current === batchId) {
+        pollTimerRef.current = setTimeout(pollStatus, 2000);
+      }
+    };
+
+    // Start polling
+    pollStatus();
+  };
+
+  const startDiscoveryPolling = (startedAt) => {
+    stopDiscoveryPolling();
+    const lookback = startedAt ? startedAt - 5000 : Date.now() - 5000;
+
+    const discover = async () => {
+      try {
+        const res = await listDegreeBatches(1, 10);
+        const payload = res?.data?.data || res?.data || {};
+        const batchesList = Array.isArray(payload?.batches) ? payload.batches : [];
+        const found = batchesList.find((batch) => {
+          const created = new Date(batch?.created_at || batch?.createdAt || batch?.updated_at || 0).getTime();
+          return created && created >= lookback;
+        });
+
+        if (found) {
+          stopDiscoveryPolling();
+          const stats = {
+            total: Number(found?.total_records) || fallbackStatsRef.current?.total || 0,
+            processed: Number(found?.processed_records) || fallbackStatsRef.current?.processed || 0,
+            successful: Number(found?.successful_records) || fallbackStatsRef.current?.successful || 0,
+            failed: Number(found?.failed_records) || fallbackStatsRef.current?.failed || 0,
+            skipped: Number(found?.skipped_records) || fallbackStatsRef.current?.skipped || 0,
+          };
+
+          fallbackStatsRef.current = { ...fallbackStatsRef.current, ...stats };
+          if (stats.total > 0) {
+            updateProcessingStats((prev) => ({ ...stats, ...prev }));
+            const percent = stats.total > 0 ? Math.round((Math.min(stats.processed, stats.total) / stats.total) * 100) : 0;
+            setUploadProgress((prev) => Math.max(prev, Math.min(100, Math.max(0, percent))));
+            setUploadPhase((prev) => (percent >= 100 ? 'completed' : 'processing'));
+            uploadSessionRef.current = {
+              status: percent >= 100 ? 'completed' : 'processing',
+              progress: percent,
+              total: stats.total,
+              processed: stats.processed,
+            };
+            try {
+              localStorage.setItem(UPLOAD_SESSION_KEY, JSON.stringify(uploadSessionRef.current));
+            } catch {}
+          }
+
+          const batchId = found?.id || found?.batch_id || found?.batchId;
+          scheduleStatusPolling(batchId);
+          return;
+        }
+      } catch (err) {
+        console.warn('Failed to discover new batch:', err?.message || err);
+      }
+
+      if (uploading) {
+        discoveryTimerRef.current = setTimeout(discover, 1500);
+      }
+    };
+
+    discover();
+  };
 
   const pickNum = (obj, keys) => {
     for (const k of keys) {
@@ -49,6 +417,10 @@ const Templates = () => {
       ?? pickNum(summary, ['stored']);
     const failed = pickNum(base, ['failed','failed_count','failure_count','errorsCount'])
       ?? pickNum(summary, ['failed']);
+    const processed = pickNum(base, ['processed','processed_records','processedCount','processed_total'])
+      ?? pickNum(summary, ['processed','processed_records']);
+    const skipped = pickNum(base, ['skipped','skipped_records'])
+      ?? pickNum(summary, ['skipped','skipped_records']);
     const result = Array.isArray(base?.result)
       ? base.result
       : Array.isArray(base?.results)
@@ -62,6 +434,18 @@ const Templates = () => {
         ? base.failed_rows
         : [];
     const message = raw?.message || base?.message || '';
+    const skippedRecords = Array.isArray(base?.skipped_records)
+      ? base.skipped_records
+      : Array.isArray(summary?.skipped_records)
+        ? summary.skipped_records
+        : [];
+    const validationErrors = Array.isArray(base?.validation_errors)
+      ? base.validation_errors
+      : Array.isArray(summary?.validation_errors)
+        ? summary.validation_errors
+        : [];
+    const code = base?.error || base?.code || raw?.error || raw?.code || null;
+    const status = raw?.status || base?.status || null;
     const providedCertificateSummary = base?.certificate_summary
       || summary?.certificate_summary
       || base?.data?.certificate_summary;
@@ -97,7 +481,80 @@ const Templates = () => {
       };
     }
 
-    return { total, success, failed, result, errors, message, certificateSummary };
+    return {
+      total,
+      success,
+      failed,
+      processed,
+      skipped,
+      result,
+      errors,
+      message,
+      certificateSummary,
+      skippedRecords,
+      validationErrors,
+      code,
+      status,
+    };
+  };
+
+  const normalizeUploadError = (error) => {
+    const response = error?.response;
+    const status = response?.status ?? null;
+    const data = response?.data ?? {};
+    const message = data?.message || error?.message || 'Upload failed';
+    const code = data?.error || data?.code || error?.code || null;
+    const validationErrors = Array.isArray(data?.validation_errors)
+      ? data.validation_errors
+      : [];
+    const rowErrors = Array.isArray(data?.errors)
+      ? data.errors
+      : [];
+    const skippedRecords = Array.isArray(data?.skipped_records)
+      ? data.skipped_records
+      : [];
+    const certificateSummary = data?.certificate_summary || null;
+
+    const details = [];
+    if (code === 'NO_FILES') {
+      details.push('No files were detected. Please select an Excel file and/or certificate files before uploading.');
+    } else if (code === 'UNAUTHORIZED' || status === 401 || error?.isAuthError) {
+      details.push('Your session may have expired. Please sign in again to continue.');
+    } else if (code === 'FILE_TOO_LARGE') {
+      details.push('One or more files exceed the 10MB limit. Remove large files and try again.');
+    } else if (code === 'TOO_MANY_FILES') {
+      details.push('A maximum of 100 files can be uploaded at once. Reduce the number of files and retry.');
+    } else if (code === 'EMPTY_EXCEL_FILE') {
+      details.push('The uploaded Excel file has no worksheets. Ensure the template contains at least one sheet with data.');
+    } else if (code === 'NO_DATA_IN_EXCEL') {
+      details.push('No data rows were found in the Excel sheet. Populate the template before uploading.');
+    } else if (code === 'INVALID_REQUEST') {
+      details.push('The upload request is invalid. Double-check the file selection and try again.');
+    } else if (code === 'UPLOAD_ERROR' && status === 400) {
+      details.push('The server rejected the upload. Confirm that the file format is supported and not corrupted.');
+    } else if (code === 'IPFS_UPLOAD_FAILED' || /ipfs/i.test(message)) {
+      details.push('Uploading to storage failed. Please retry after some time.');
+    }
+
+    if (!response && error?.message && !details.length) {
+      details.push('Unable to reach the server. Check your internet connection and try again.');
+    }
+
+    if (validationErrors.length > 0 && !details.length) {
+      details.push('Some rows failed validation. Review the row-level errors below.');
+    }
+
+    return {
+      status,
+      code,
+      message,
+      details,
+      validationErrors,
+      errors: rowErrors,
+      skippedRecords,
+      certificateSummary,
+      raw: data,
+    };
   };
 
   // Load from localStorage when email (key) changes
@@ -242,7 +699,7 @@ const Templates = () => {
       return Array.from(existingFiles.values());
     });
 
-    setUploadError('');
+    setUploadError(null);
     setUploadResult(null);
   };
 
@@ -257,67 +714,163 @@ const Templates = () => {
       ? filesToUpload[0].name
       : `${filesToUpload[0].name} (+${filesToUpload.length - 1} more)`;
     const totalSize = filesToUpload.reduce((sum, file) => sum + (file?.size || 0), 0);
+    let succeeded = false;
+    
+    // Clear any existing toast
+    setToast(null);
     try {
       setUploading(true);
       setUploadProgress(0);
-      setUploadError('');
+      setUploadPhase('uploading');
+      setUploadError(null);
       setUploadResult(null);
+      updateProcessingStats(null);
+      fallbackStatsRef.current = null;
+      stopBatchPolling();
+      activeBatchIdRef.current = null;
       const uploadStart = Date.now();
+      uploadStartRef.current = uploadStart;
+      // Initialize upload session
+      const initialSession = saveUploadSession({
+        status: 'uploading',
+        startedAt: uploadStart,
+        progress: 0,
+        total: 0,
+        batchId: null,
+        fileCount: filesToUpload.length,
+        fileName: displayName,
+        fileSize: totalSize,
+        lastUpdated: Date.now()
+      }, { replace: true });
       const res = await uploadDegreeBatch(filesToUpload, {
         onUploadProgress: (evt) => {
           if (!evt.total) return;
           const pct = Math.round((evt.loaded / evt.total) * 100);
-          setUploadProgress(pct);
+          const safePct = Math.min(100, Math.max(0, pct));
+          setUploadProgress(safePct);
+          setUploadPhase(safePct >= 100 ? 'processing' : 'uploading');
+          
+          // Update upload session with progress
+          saveUploadSession({
+            status: safePct >= 100 ? 'processing' : 'uploading',
+            progress: safePct,
+            lastUpdated: Date.now(),
+          });
         }
       });
       const raw = res?.data || { success: true };
       const norm = normalizeUpload(raw);
-      setUploadResult({ data: norm, message: norm.message });
-      // Save to session list
-      setUploadedFiles((prev) => [
-        {
-          name: displayName,
-          size: totalSize,
-          at: Date.now(),
-          summary: {
-            total: norm.total,
-            success: norm.success,
-            failed: norm.failed,
-          },
-          certificates: {
-            uploaded: norm.certificateSummary?.matched ?? 0,
-            total: norm.certificateSummary?.total_certificates ?? 0,
-            unmatched: norm.certificateSummary?.unmatched ?? [],
-          },
-          // store structured rows
-          result: norm.result,
-          errors: norm.errors,
+      const batchId = raw.batchId || raw.batch_id || norm.batchId || norm.batch_id;
+      const totalFromSummary = Number(norm.total) || 0;
+      const processedFromSummary = Number(norm.processed) || 0;
+      const failedFromSummary = Number(norm.failed) || 0;
+      const successFromSummary = Number(norm.success) || 0;
+      const skippedFromSummary = Number(norm.skipped) || 0;
+      
+      const initialStats = {
+        total: totalFromSummary,
+        processed: totalFromSummary > 0 ? Math.min(processedFromSummary, totalFromSummary) : 0,
+        successful: totalFromSummary > 0 ? Math.min(successFromSummary, totalFromSummary) : 0,
+        failed: totalFromSummary > 0 ? Math.min(failedFromSummary, totalFromSummary) : 0,
+        skipped: Math.max(0, skippedFromSummary),
+      };
+      
+      updateProcessingStats(initialStats);
+      fallbackStatsRef.current = { ...initialStats };
+      
+      // Update session with batch ID and processing state
+      saveUploadSession({
+        status: 'processing',
+        batchId: batchId || null,
+        progress: initialStats.total > 0 ? Math.round((initialStats.processed / initialStats.total) * 100) : 0,
+        total: totalFromSummary,
+        processed: processedFromSummary,
+        stats: initialStats,
+        lastUpdated: Date.now(),
+      });
+
+      // Start polling for status updates if we have a batch ID
+      if (batchId) {
+        activeBatchIdRef.current = batchId;
+        scheduleStatusPolling(batchId);
+      } else if (totalFromSummary > 0) {
+        // If no batch ID but we have a total, use the initial stats for progress
+        const percent = Math.min(100, Math.max(0, Math.round((processedFromSummary / totalFromSummary) * 100)));
+        setUploadProgress(percent);
+        const isComplete = percent >= 100;
+        setUploadPhase(isComplete ? 'completed' : 'processing');
+        
+        if (isComplete) {
+          finalizeUpload();
+        }
+      } else {
+        // Fallback to showing upload complete if we can't track progress
+        setUploadProgress(100);
+        setUploadPhase('completed');
+        finalizeUpload();
+      }
+
+      upsertHistoryEntry({
+        sessionId: initialSession?.sessionId,
+        batchId: batchId || null,
+        name: filesToUpload.map(file => file.name).join(', '),
+        size: totalSize,
+        at: initialSession?.startedAt || Date.now(),
+        summary: {
+          total: norm.total,
+          success: norm.success,
+          failed: norm.failed,
         },
-        ...prev,
-      ].slice(0, MAX_HISTORY));
+        certificates: {
+          uploaded: norm.certificateSummary?.matched ?? 0,
+          total: norm.certificateSummary?.total_certificates ?? 0,
+          unmatched: norm.certificateSummary?.unmatched ?? [],
+        },
+        result: norm.result,
+        errors: norm.errors,
+        lastUpdated: Date.now(),
+      });
       
       // Clear selected files after successful upload
       setSelectedFiles([]);
-      
-      // Refresh batches shortly after upload and poll a few times until the new batch appears
-      const tryPoll = async (attempt = 1) => {
-        const fresh = await fetchBatches();
-        // If batches already present and latest created_at is after uploadStart, stop polling
-        const latestVal = Array.isArray(fresh) && fresh.length > 0 ? (fresh[0]?.created_at || fresh[0]?.createdAt) : null;
-        const latestTs = latestVal ? new Date(latestVal).getTime() : 0;
-        if (latestTs && latestTs >= uploadStart) return;
-        if (attempt < 5) {
-          setTimeout(() => tryPoll(attempt + 1), 1000 * attempt);
-        }
-      };
-      setTimeout(() => void tryPoll(1), 800);
+
+      const uploadedBatchId = raw?.data?.summary?.batch_id
+        || raw?.summary?.batch_id
+        || raw?.data?.batch_id
+        || raw?.batch_id
+        || null;
+
+      if (uploadedBatchId) {
+        scheduleStatusPolling(uploadedBatchId);
+      } else {
+        startDiscoveryPolling(uploadStart);
+      }
     } catch (err) {
       console.error('Upload failed:', err);
-      const msg = err?.response?.data?.message || err?.message || 'Upload failed';
-      setUploadError(msg);
+      const normalized = normalizeUploadError(err);
+      setUploadError(normalized);
+      setUploadResult(null);
     } finally {
-      setUploading(false);
-      setUploadProgress(0);
+      if (!succeeded) {
+        stopBatchPolling();
+        setUploading(false);
+        setUploadProgress(0);
+        setUploadPhase(null);
+        updateProcessingStats(null);
+        uploadSessionRef.current = null;
+        try { localStorage.removeItem(UPLOAD_SESSION_KEY); } catch {}
+      }
+      if (succeeded) {
+        setTimeout(() => {
+          stopBatchPolling();
+          setUploading(false);
+          setUploadPhase(null);
+          setUploadProgress(0);
+          updateProcessingStats(null);
+          uploadSessionRef.current = null;
+          try { localStorage.removeItem(UPLOAD_SESSION_KEY); } catch {}
+        }, 1200);
+      }
     }
   };
 
@@ -424,12 +977,26 @@ const Templates = () => {
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.6fr_1fr]">
             <div className="relative overflow-hidden rounded-3xl border border-gray-200 bg-white/95 p-6 shadow-sm backdrop-blur">
               {uploading && (
-                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-3xl bg-white/70 backdrop-blur-sm">
-                  <div className="w-64 max-w-full">
-                    <div className="h-2 rounded bg-gray-200">
-                      <div className="h-2 rounded bg-[#14B87D]" style={{ width: `${uploadProgress}%` }} />
-                    </div>
-                    <div className="mt-2 text-center text-xs text-gray-700">Uploading… {uploadProgress}%</div>
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-3xl bg-white/70 px-6 backdrop-blur-sm">
+                  <div className="w-full max-w-xs">
+                    <ProgressBar
+                      value={uploadProgress}
+                      label={
+                        uploadPhase === 'processing'
+                          ? (() => {
+                              const total = processingStats?.total;
+                              const processed = processingStats?.processed;
+                              if (total && processed >= 0) {
+                                const pct = Math.min(100, Math.max(0, Math.round((Math.min(processed, total) / total) * 100)));
+                                return `Processing ${processed}/${total} records (${pct}%)…`;
+                              }
+                              return 'Processing uploaded records…';
+                            })()
+                          : uploadPhase === 'completed'
+                            ? 'Finalizing upload'
+                            : 'Uploading files…'
+                      }
+                    />
                   </div>
                 </div>
               )}
@@ -441,7 +1008,74 @@ const Templates = () => {
                 </div>
                 <Dropzone onFiles={handleFiles} disabled={uploading} files={selectedFiles} />
                 {uploadError && (
-                  <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{uploadError}</div>
+                  <div className="space-y-3 rounded-2xl border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700">
+                    <div className="font-medium">
+                      {uploadError.message}
+                      {(uploadError.code || uploadError.status) && (
+                        <span className="ml-1 text-xs font-semibold uppercase tracking-wide text-red-500">
+                          {uploadError.code || ''}
+                          {uploadError.code && uploadError.status ? ' · ' : ''}
+                          {uploadError.status || ''}
+                        </span>
+                      )}
+                    </div>
+                    {Array.isArray(uploadError.details) && uploadError.details.length > 0 && (
+                      <ul className="space-y-1 text-xs text-red-600">
+                        {uploadError.details.map((detail, idx) => (
+                          <li key={idx} className="flex items-start gap-2">
+                            <span className="mt-0.5 h-1.5 w-1.5 flex-none rounded-full bg-red-400" />
+                            <span>{detail}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {Array.isArray(uploadError.validationErrors) && uploadError.validationErrors.length > 0 && (
+                      <div className="space-y-2 rounded-xl border border-red-200 bg-white/70 px-3 py-2 text-xs text-red-600">
+                        <div className="font-semibold text-red-700">Validation issues</div>
+                        <ul className="space-y-1">
+                          {uploadError.validationErrors.map((errItem, idx) => (
+                            <li key={idx}>
+                              {errItem?.field ? <span className="font-medium">{errItem.field}:</span> : null} {errItem?.message || String(errItem)}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {Array.isArray(uploadError.errors) && uploadError.errors.length > 0 && (
+                      <div className="space-y-2 rounded-xl border border-red-200 bg-white/70 px-3 py-2 text-xs text-red-600">
+                        <div className="font-semibold text-red-700">Row errors</div>
+                        <ul className="divide-y divide-red-100">
+                          {uploadError.errors.map((errItem, idx) => (
+                            <li key={idx} className="py-2">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <div className="font-medium">{errItem?.error || 'Validation error'}</div>
+                                  {errItem?.registration_number && (
+                                    <div className="text-[11px] text-red-500">Reg #: {errItem.registration_number}</div>
+                                  )}
+                                  {errItem?.student_name && (
+                                    <div className="text-[11px] text-red-500">Name: {errItem.student_name}</div>
+                                  )}
+                                  {errItem?.filename && (
+                                    <div className="text-[11px] text-red-500">File: {errItem.filename}</div>
+                                  )}
+                                  {errItem?.suggestion && (
+                                    <div className="text-[11px] text-red-500">Suggestion: {errItem.suggestion}</div>
+                                  )}
+                                </div>
+                                <span className="text-[11px] text-red-500">Row {errItem?.row ?? idx + 1}</span>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {Array.isArray(uploadError.skippedRecords) && uploadError.skippedRecords.length > 0 && (
+                      <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                        {uploadError.skippedRecords.length} certificate(s) could not be matched to Excel rows.
+                      </div>
+                    )}
+                  </div>
                 )}
 
                 {uploadResult && (
@@ -586,7 +1220,7 @@ const Templates = () => {
                 <h3 className="text-lg font-semibold text-gray-900">Need assistance?</h3>
                 <p className="mt-2 text-sm text-gray-700">Schedule a working session with SecureDApp specialists.</p>
                 <ul className="mt-3 space-y-2 text-xs text-gray-700">
-                  <li>📞 Hotline: <a href="tel:+918800112233" className="text-[#14B87D] hover:underline">+91 8800 112 233</a></li>
+                  <li>📞 Hotline: <a href="tel:+919606015868" className="text-[#14B87D] hover:underline">+91 96060 15868</a></li>
                   <li>✉️ Email: <a href="mailto:hello@securedapp.io" className="text-[#14B87D] hover:underline">hello@securedapp.io</a></li>
                   <li>🗓️ Book: Use the dashboard calendar quick action.</li>
                 </ul>
@@ -759,20 +1393,71 @@ const Templates = () => {
                         type="button"
                         className="inline-flex items-center justify-center rounded-full border border-[#14B87D]/30 px-3 py-1 text-xs font-medium text-[#14B87D] hover:bg-[#ecfdf5]"
                         onClick={async () => {
+                          const currentId = selectedBatch?.id ?? selectedBatch?.batch_id;
+                          const nextId = b.id ?? b.batch_id;
+
+                          if (currentId && currentId === nextId) {
+                            setSelectedBatch(null);
+                            setBatchStatus(null);
+                            setBatchDegrees([]);
+                            setBatchStatusLoading(false);
+                            return;
+                          }
+
                           setSelectedBatch(b);
                           setBatchStatus(null);
+                          setBatchDegrees([]);
                           setBatchStatusLoading(true);
                           try {
-                            const res = await getBatchStatus(b.id || b.batch_id || b.batchId);
-                            setBatchStatus(res?.data?.data || res?.data || null);
+                            const batchIdentifier = b.id || b.batch_id || b.batchId;
+                            const statusPromise = getBatchStatus(batchIdentifier);
+                            const degreesPromise = (async () => {
+                              try {
+                                const all = [];
+                                let pageCursor = 1;
+                                let totalPages = 1;
+
+                                do {
+                                  const response = await getBatchDegrees(batchIdentifier, pageCursor, 100);
+                                  const envelope = response?.data?.data || response?.data || {};
+                                  const list = Array.isArray(envelope?.degrees) ? envelope.degrees : [];
+                                  if (list.length) all.push(...list);
+
+                                  const pagination = envelope?.pagination || {};
+                                  const pageValue = Number(pagination?.total_pages ?? pagination?.totalPages ?? pagination?.pages);
+                                  if (Number.isFinite(pageValue) && pageValue > 0) {
+                                    totalPages = pageValue;
+                                  } else if (Number.isFinite(pagination?.total)) {
+                                    const computed = Math.ceil(Number(pagination.total) / 100);
+                                    if (Number.isFinite(computed) && computed > 0) {
+                                      totalPages = computed;
+                                    }
+                                  }
+
+                                  pageCursor += 1;
+                                } while (pageCursor <= totalPages);
+
+                                setBatchDegrees(all);
+                              } catch (err) {
+                                console.error('Failed to fetch batch degrees:', err);
+                                setBatchDegrees([]);
+                              }
+                            })();
+
+                            const statusRes = await statusPromise;
+                            setBatchStatus(statusRes?.data?.data || statusRes?.data || null);
+                            await degreesPromise;
                           } catch (e) {
                             setBatchStatus({ error: e?.response?.data?.message || e?.message || 'Failed to load status' });
+                            setBatchDegrees([]);
                           } finally {
                             setBatchStatusLoading(false);
                           }
                         }}
                       >
-                        View status
+                        {selectedBatch && (selectedBatch.id ?? selectedBatch.batch_id) === (b.id ?? b.batch_id)
+                          ? 'Hide status'
+                          : 'View status'}
                       </button>
                     </div>
 
@@ -786,18 +1471,30 @@ const Templates = () => {
                           <div className="space-y-2">
                             <div><span className="text-gray-500">Upload status:</span> {batchStatus?.upload_status || '-'}</div>
                             <div><span className="text-gray-500">Total records:</span> {batchStatus?.total_records ?? '-'}</div>
-                            {Array.isArray(batchStatus?.sample_degrees) && batchStatus.sample_degrees.length > 0 && (
+                            {previewDegrees.length > 0 && (
                               <div>
-                                <div className="text-gray-700">Sample degrees</div>
+                                <div className="text-gray-700">Degrees</div>
                                 <ul className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
-                                  {batchStatus.sample_degrees.slice(0, 6).map((d, i) => (
-                                    <li key={i} className="rounded-2xl border border-white/60 bg-white px-3 py-2">
+                                  {previewDegrees.map((d, i) => (
+                                    <li key={d?.id || d?.degree_id || i} className="rounded-2xl border border-white/60 bg-white px-3 py-2">
                                       <p className="font-medium text-[#14B87D]">{d?.student_name || 'N/A'}</p>
-                                      <p className="text-xs text-gray-600">{d?.degree_id || d?.id}</p>
-                                      <p className="text-xs text-gray-500">Verification: {d?.verification_status || '-'}</p>
+                                      <p className="text-xs text-gray-600">{d?.degree_id || d?.id || '—'}</p>
+                                      <p className='text-xs text-gray-500'>{d?.course || 'N/A'}</p>
+                                      <p className='text-xs text-gray-500'>{d?.year || 'N/A'}</p>
                                     </li>
                                   ))}
                                 </ul>
+                                {hasMoreDegrees && (
+                                  <div className="mt-3">
+                                    <Link
+                                      to="/degrees"
+                                      className="inline-flex items-center gap-2 rounded-full border border-[#14B87D]/60 bg-white px-4 py-1.5 text-sm font-medium text-[#14B87D] transition hover:bg-[#ecfdf5]"
+                                    >
+                                      See more degrees
+                                      <span aria-hidden="true">→</span>
+                                    </Link>
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>

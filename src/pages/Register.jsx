@@ -7,6 +7,29 @@ import { useForm } from 'react-hook-form';
 import Button from '../components/Button';
 import { registerUser, verifyOtp, resendRegisterOtp } from '../utils/api';
 
+const extractApiError = (error, fallbackMessage) => {
+  const data = error?.response?.data;
+
+  if (data) {
+    const parts = [];
+
+    if (data.message) parts.push(data.message);
+    if (Array.isArray(data.errors) && data.errors.length) {
+      const detailed = data.errors
+        .map((item) => item?.msg || item?.message || `${item?.param || 'field'} is invalid`)
+        .join(' ');
+      if (detailed) parts.push(detailed);
+    }
+    if (data.error && !parts.includes(data.error)) parts.push(data.error);
+
+    if (parts.length) {
+      return parts.join(' ');
+    }
+  }
+
+  return error?.message || fallbackMessage;
+};
+
 const Register = () => {
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm({
     defaultValues: {
@@ -61,17 +84,22 @@ const Register = () => {
       };
 
       const res = await registerUser(payload);
-      console.log('Backend register response:', res.data);
+      const body = res?.data || {};
 
-      if (res.data.token) {
-        localStorage.setItem('token', res.data.token);
+      if (!body.success) {
+        throw {
+          response: {
+            data: body,
+          },
+        };
       }
 
       setShowOtpModal(true);
-      setRegisteredEmail(data.contactEmail);
+      setRegisteredEmail(payload.contactEmail);
+      setOtpInfo(body.message || 'OTP sent to your email.');
     } catch (err) {
       console.error('Register error:', err.response?.data || err);
-      setError(err.response?.data?.message || 'Registration failed. Please try again.');
+      setError(extractApiError(err, 'Registration failed. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -85,17 +113,22 @@ const Register = () => {
       setError('');
 
       const res = await verifyOtp({ email: registeredEmail, otp });
+      const body = res?.data || {};
 
-      if (res?.data?.success || res?.status === 200 || res?.data?.message === "Institution registered successfully") {
+      if (body.success) {
+        const token = body?.data?.token;
+        if (token) {
+          localStorage.setItem('token', token);
+        }
         setOtp('');
         setShowOtpModal(false);
         navigate('/login', { replace: true });
       } else {
-        setError(res.data?.message || 'Invalid OTP. Please try again.');
+        setError(body.message || 'Invalid OTP. Please try again.');
       }
     } catch (err) {
       console.error('OTP verification error:', err.response?.data || err);
-      setError(err.response?.data?.message || 'OTP verification failed. Please try again.');
+      setError(extractApiError(err, 'OTP verification failed. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -108,17 +141,15 @@ const Register = () => {
       setError('');
 
       const res = await resendRegisterOtp({ email: registeredEmail });
-      console.log('Resend OTP response:', res.data);
-      const ok = res?.data?.success === true || res?.status === 200 ||
-                 /sent|resent|success/i.test(res?.data?.message || '');
-      if (ok) {
-        setOtpInfo('OTP has been resent to your email.');
+      const body = res?.data || {};
+      if (body.success) {
+        setOtpInfo(body.message || 'OTP has been resent to your email.');
       } else {
-        setError(res?.data?.message || 'Failed to resend OTP.');
+        setError(body.message || 'Failed to resend OTP.');
       }
     } catch (err) {
       console.error('Resend OTP error:', err.response?.data || err);
-      setError(err.response?.data?.message || 'Failed to resend OTP.');
+      setError(extractApiError(err, 'Failed to resend OTP.'));
     } finally {
       setLoading(false);
     }
@@ -158,12 +189,6 @@ const Register = () => {
                 </div>
               ))}
             </div>
-
-            {error && (
-              <div className="rounded-xl border border-red-400/30 bg-red-50 text-red-700 text-sm px-3 py-2 mb-4">
-                {error}
-              </div>
-            )}
 
             <form onSubmit={handleSubmit(onSubmit)} className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Institution Name */}
@@ -400,11 +425,19 @@ const Register = () => {
                 <Button type="submit" disabled={loading}>
                   {loading ? 'Creating account...' : 'Get Started'}
                 </Button>
+
+                {error && (
+                  <div className="mt-4 rounded-xl border border-red-400/30 bg-red-50 text-red-700 text-sm px-3 py-2">
+                    {error}
+                  </div>
+                )}
                 <p className="text-sm text-gray-600 mt-3">
                   Already have an account? <Link to="/login" className="text-[#14B87D] hover:underline">Sign in</Link>
                 </p>
               </div>
             </form>
+
+
           </div>
 
           {/* Benefits Card */}
