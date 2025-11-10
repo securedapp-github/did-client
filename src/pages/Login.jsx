@@ -70,7 +70,7 @@ const Login = () => {
         };
       }
 
-      const token = body?.data?.token;
+      const token = body?.token;
       if (!token) {
         throw new Error('No token returned from server');
       }
