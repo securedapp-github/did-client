@@ -42,7 +42,6 @@ const Templates = () => {
           const session = JSON.parse(savedSession);
           if (session && session.status) {
             uploadSessionRef.current = session;
-            syncHistoryFromSession(session);
             setUploadPhase(session.status);
             setUploadProgress(session.progress || 0);
             
@@ -129,107 +128,24 @@ const Templates = () => {
     activeBatchIdRef.current = null;
   };
 
-  const mergeHistoryItems = (existing = {}, incoming = {}) => {
-    const next = { ...existing };
-
-    Object.entries(incoming).forEach(([key, value]) => {
-      if (value === undefined) return;
-
-      if (key === 'summary' || key === 'certificates') {
-        const prevSection = existing[key] || {};
-        next[key] = value === null ? null : { ...prevSection, ...value };
-      } else if (key === 'result' || key === 'errors') {
-        next[key] = Array.isArray(value) ? value : [];
-      } else if (key === 'at') {
-        next[key] = value || existing[key] || Date.now();
-      } else {
-        next[key] = value;
-      }
-    });
-
-    return next;
-  };
-
-  const upsertHistoryEntry = (entry) => {
-    if (!entry) return;
-    const normalized = {
-      ...entry,
-      at: entry.at || Date.now(),
-    };
-
-    setUploadedFiles((prev) => {
-      const list = Array.isArray(prev) ? [...prev] : [];
-      const index = list.findIndex((item) => (
-        (normalized.batchId && item.batchId === normalized.batchId) ||
-        (normalized.sessionId && item.sessionId === normalized.sessionId)
-      ));
-
-      if (index >= 0) {
-        const merged = mergeHistoryItems(list[index], normalized);
-        if (!merged.sessionId && normalized.sessionId) merged.sessionId = normalized.sessionId;
-        if (!merged.batchId && normalized.batchId) merged.batchId = normalized.batchId;
-        list[index] = merged;
-      } else {
-        list.unshift(normalized);
-      }
-
-      list.sort((a, b) => (b.at || 0) - (a.at || 0));
-      return list.slice(0, MAX_HISTORY);
-    });
-  };
-
-  const syncHistoryFromSession = (session) => {
-    if (!session) return;
-    const historyEntry = {
-      sessionId: session.sessionId || session.startedAt || session.lastUpdated,
-      batchId: session.batchId || null,
-      name: session.fileName,
-      size: session.fileSize,
-      at: session.startedAt || session.lastUpdated || Date.now(),
-      status: session.status,
-      progress: typeof session.progress === 'number' ? session.progress : undefined,
-      fileCount: session.fileCount,
-      lastUpdated: session.lastUpdated,
-    };
-
-    if (session.stats) {
-      historyEntry.summary = {
-        total: session.stats.total,
-        success: session.stats.successful ?? session.stats.success,
-        failed: session.stats.failed,
-        skipped: session.stats.skipped,
-        processed: session.stats.processed,
-      };
-    }
-
-    upsertHistoryEntry(historyEntry);
-  };
-
-  const saveUploadSession = (updates, { replace = false } = {}) => {
+  const saveUploadSession = (updates) => {
     if (!updates) {
-      const existingSession = uploadSessionRef.current;
       uploadSessionRef.current = null;
       try {
         localStorage.removeItem(UPLOAD_SESSION_KEY);
       } catch {}
-      return existingSession;
+      return null;
     }
 
-    const base = replace ? {} : (uploadSessionRef.current || {});
     const nextSession = {
-      ...base,
+      ...(uploadSessionRef.current || {}),
       ...updates,
     };
-
-    if (!nextSession.sessionId) {
-      nextSession.sessionId = nextSession.startedAt || Date.now();
-    }
 
     uploadSessionRef.current = nextSession;
     try {
       localStorage.setItem(UPLOAD_SESSION_KEY, JSON.stringify(nextSession));
     } catch {}
-    syncHistoryFromSession(nextSession);
     return nextSession;
   };
 
@@ -308,12 +224,20 @@ const Templates = () => {
         };
 
         // Update the session in localStorage
-        saveUploadSession({
+        const updatedSession = {
+          ...(uploadSessionRef.current || {}),
           status: 'processing',
           progress,
           lastUpdated: now,
-          stats: nextStats,
-        });
+          stats: nextStats
+        };
+        
+        uploadSessionRef.current = updatedSession;
+        try {
+          localStorage.setItem(UPLOAD_SESSION_KEY, JSON.stringify(updatedSession));
+        } catch (err) {
+          console.warn('Failed to update upload session:', err);
+        }
 
         updateProcessingStats(nextStats);
         fallbackStatsRef.current = nextStats;
@@ -731,7 +655,7 @@ const Templates = () => {
       const uploadStart = Date.now();
       uploadStartRef.current = uploadStart;
       // Initialize upload session
-      const initialSession = saveUploadSession({
+      const initialSession = {
         status: 'uploading',
         startedAt: uploadStart,
         progress: 0,
@@ -739,9 +663,14 @@ const Templates = () => {
         batchId: null,
         fileCount: filesToUpload.length,
         fileName: displayName,
-        fileSize: totalSize,
         lastUpdated: Date.now()
-      }, { replace: true });
+      };
+      uploadSessionRef.current = initialSession;
+      try {
+        localStorage.setItem(UPLOAD_SESSION_KEY, JSON.stringify(initialSession));
+      } catch (err) {
+        console.warn('Failed to save upload session:', err);
+      }
       const res = await uploadDegreeBatch(filesToUpload, {
         onUploadProgress: (evt) => {
           if (!evt.total) return;
@@ -751,11 +680,25 @@ const Templates = () => {
           setUploadPhase(safePct >= 100 ? 'processing' : 'uploading');
           
           // Update upload session with progress
-          saveUploadSession({
+          uploadSessionRef.current = {
+            ...(uploadSessionRef.current || {}),
             status: safePct >= 100 ? 'processing' : 'uploading',
             progress: safePct,
-            lastUpdated: Date.now(),
-          });
+          };
+          
+          try {
+            localStorage.setItem(UPLOAD_SESSION_KEY, JSON.stringify(uploadSessionRef.current));
+          } catch (err) {
+            console.warn('Failed to save upload session:', err);
+          }
+          uploadSessionRef.current = {
+            ...(uploadSessionRef.current || {}),
+            status: safePct >= 100 ? 'processing' : 'uploading',
+            progress: safePct,
+          };
+          try {
+            localStorage.setItem(UPLOAD_SESSION_KEY, JSON.stringify(uploadSessionRef.current));
+          } catch {}
         }
       });
       const raw = res?.data || { success: true };
@@ -779,15 +722,22 @@ const Templates = () => {
       fallbackStatsRef.current = { ...initialStats };
       
       // Update session with batch ID and processing state
-      saveUploadSession({
+      const updatedSession = {
+        ...(uploadSessionRef.current || {}),
         status: 'processing',
         batchId: batchId || null,
-        progress: initialStats.total > 0 ? Math.round((initialStats.processed / initialStats.total) * 100) : 0,
+        progress: 0,
         total: totalFromSummary,
         processed: processedFromSummary,
-        stats: initialStats,
-        lastUpdated: Date.now(),
-      });
+        lastUpdated: Date.now()
+      };
+      uploadSessionRef.current = updatedSession;
+      
+      try {
+        localStorage.setItem(UPLOAD_SESSION_KEY, JSON.stringify(updatedSession));
+      } catch (err) {
+        console.warn('Failed to update upload session:', err);
+      }
 
       // Start polling for status updates if we have a batch ID
       if (batchId) {
@@ -810,26 +760,27 @@ const Templates = () => {
         finalizeUpload();
       }
 
-      upsertHistoryEntry({
-        sessionId: initialSession?.sessionId,
-        batchId: batchId || null,
-        name: filesToUpload.map(file => file.name).join(', '),
-        size: totalSize,
-        at: initialSession?.startedAt || Date.now(),
-        summary: {
-          total: norm.total,
-          success: norm.success,
-          failed: norm.failed,
+      setUploadedFiles((prev) => [
+        {
+          name: filesToUpload.map(file => file.name).join(', '),
+          size: totalSize,
+          at: Date.now(),
+          summary: {
+            total: norm.total,
+            success: norm.success,
+            failed: norm.failed,
+          },
+          certificates: {
+            uploaded: norm.certificateSummary?.matched ?? 0,
+            total: norm.certificateSummary?.total_certificates ?? 0,
+            unmatched: norm.certificateSummary?.unmatched ?? [],
+          },
+          // store structured rows
+          result: norm.result,
+          errors: norm.errors,
         },
-        certificates: {
-          uploaded: norm.certificateSummary?.matched ?? 0,
-          total: norm.certificateSummary?.total_certificates ?? 0,
-          unmatched: norm.certificateSummary?.unmatched ?? [],
-        },
-        result: norm.result,
-        errors: norm.errors,
-        lastUpdated: Date.now(),
-      });
+        ...prev,
+      ].slice(0, MAX_HISTORY));
       
       // Clear selected files after successful upload
       setSelectedFiles([]);
