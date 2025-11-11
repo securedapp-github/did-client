@@ -4,7 +4,6 @@ import Layout from '../components/Layout';
 import Button from '../components/Button';
 import PageHeader from '../components/PageHeader';
 import Dropzone from '../components/Dropzone';
-import ProgressBar from '../components/ProgressBar';
 import { uploadDegreeBatch, getDegreeTemplate, listUploads, listDegreeBatches, getBatchStatus, getBatchDegrees } from '../utils/api';
 import { useAuthContext } from '../context/AuthContext';
 
@@ -25,6 +24,7 @@ const Templates = () => {
   const [expanded, setExpanded] = useState({});
   const [toast, setToast] = useState(null);
   const MAX_HISTORY = 50;
+  const UPLOAD_SESSION_MAX_AGE = 15 * 60 * 1000; // 15 minutes
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [downloadHistoryLoaded, setDownloadHistoryLoaded] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -41,21 +41,38 @@ const Templates = () => {
         if (savedSession) {
           const session = JSON.parse(savedSession);
           if (session && session.status) {
+            const age = session.lastUpdated ? Date.now() - session.lastUpdated : 0;
+            const progress = Number(session.progress) || 0;
+            const isActiveStatus = session.status === 'uploading' || session.status === 'processing';
+            const isStale = age > UPLOAD_SESSION_MAX_AGE;
+            const isComplete = session.status === 'completed' || progress >= 100;
+
+            if (!isActiveStatus || isStale || isComplete) {
+              saveUploadSession(null);
+              return;
+            }
+
             uploadSessionRef.current = session;
             setUploadPhase(session.status);
             setUploadProgress(session.progress || 0);
-            
-            if (session.status === 'processing' || session.status === 'uploading') {
-              setUploading(true);
-              
-              // If we have a batch ID, resume polling
-              if (session.batchId) {
-                activeBatchIdRef.current = session.batchId;
-                scheduleStatusPolling(session.batchId);
-              } else if (session.startedAt) {
-                // Otherwise try to discover the batch
-                startDiscoveryPolling(session.startedAt);
-              }
+
+            if (session.stats) {
+              processingStatsRef.current = session.stats;
+              setProcessingStats(session.stats);
+            }
+
+            if (session.startedAt) {
+              uploadStartRef.current = session.startedAt;
+            }
+
+            setUploading(true);
+
+            // If we have a batch ID, resume polling; otherwise rediscover
+            if (session.batchId) {
+              activeBatchIdRef.current = session.batchId;
+              scheduleStatusPolling(session.batchId);
+            } else if (session.startedAt) {
+              startDiscoveryPolling(session.startedAt);
             }
           }
         }
@@ -157,24 +174,30 @@ const Templates = () => {
     updateProcessingStats(null);
   };
 
-  const finalizeUpload = ({ toastMessage, toastType = 'success' } = {}) => {
-    // Don't reset indicators immediately, let the effect handle it after showing the toast
-    const message = toastMessage || (toastType === 'success' 
-      ? 'Degrees processed successfully.' 
-      : 'Degree upload update.');
-    
-    setToast({ type: toastType, message });
-    
-    // Set a timer to reset indicators after toast is shown
+  const dismissToast = () => {
     if (toastTimerRef.current) {
       clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
     }
-    
-    toastTimerRef.current = setTimeout(() => {
+    setToast(null);
+  };
+
+  const finalizeUpload = ({ toastMessage, toastType = 'success', resetIndicators = true, duration = 4000 } = {}) => {
+    const message = toastMessage || (toastType === 'success'
+      ? 'Degrees processed successfully.'
+      : 'Degree upload update.');
+
+    dismissToast();
+    setToast({ type: toastType, message });
+
+    if (resetIndicators) {
       resetUploadIndicators();
       saveUploadSession(null);
-      toastTimerRef.current = null;
-    }, 5000); // Match this with your toast auto-hide duration
+    }
+
+    toastTimerRef.current = setTimeout(() => {
+      dismissToast();
+    }, duration);
   };
 
   const scheduleStatusPolling = (batchId) => {
@@ -188,13 +211,14 @@ const Templates = () => {
         const fallback = fallbackStatsRef.current || {};
         const statusRes = await getBatchStatus(batchId);
         const statusData = statusRes?.data?.data || statusRes?.data || {};
-        
+        const statusValue = String(statusData?.upload_status || statusData?.status || '').toLowerCase();
+
         // Get the current time for the session update
         const now = Date.now();
-        
+
         // Get total records from response or fallback
         const total = Number(statusData?.total_records) || fallback.total || processingStatsRef.current?.total || 0;
-        
+
         // Get processed records count
         const processedValue = Number(statusData?.processed_records) || 0;
         const successfulValue = Number(statusData?.successful_records) || 0;
@@ -242,11 +266,42 @@ const Templates = () => {
         updateProcessingStats(nextStats);
         fallbackStatsRef.current = nextStats;
 
+        const isSuccessStatus = statusValue.includes('completed') || statusValue.includes('complete') || statusValue.includes('success');
+        const isFailureStatus = statusValue.includes('fail') || statusValue.includes('error') || statusValue.includes('abort') || statusValue.includes('cancel');
+        const explicitFailure = statusData?.success === false;
+
+        if (isFailureStatus || explicitFailure) {
+          setUploadPhase('completed');
+          setUploadProgress(0);
+          setUploadError((prev) => ({
+            ...(prev || {}),
+            message: statusData?.message || 'Degree processing failed. Please review the upload summary.',
+            code: statusData?.error || prev?.code,
+            status: statusData?.status_code || prev?.status,
+          }));
+          finalizeUpload({
+            toastMessage: statusData?.message || 'Degree processing failed. Please review errors.',
+            toastType: 'error'
+          });
+          return;
+        }
+
         // Check if processing is complete
-        if (progress >= 100 || (total > 0 && processedValue >= total)) {
+        if (progress >= 100 || (total > 0 && processedValue >= total) || (total === 0 && isSuccessStatus)) {
+          setUploadPhase('completed');
+          setUploadProgress(100);
+          finalizeUpload({
+            toastMessage: statusData?.message || 'Degree processing completed successfully!',
+            toastType: 'success'
+          });
+          return;
+        }
+
+        if (isSuccessStatus) {
+          // Even if totals are missing, honor the completion flag
           setUploadPhase('completed');
           finalizeUpload({
-            toastMessage: 'Degree processing completed successfully!',
+            toastMessage: statusData?.message || 'Degree processing completed successfully!',
             toastType: 'success'
           });
           return;
@@ -301,6 +356,7 @@ const Templates = () => {
               progress: percent,
               total: stats.total,
               processed: stats.processed,
+              lastUpdated: Date.now(),
             };
             try {
               localStorage.setItem(UPLOAD_SESSION_KEY, JSON.stringify(uploadSessionRef.current));
@@ -673,32 +729,30 @@ const Templates = () => {
       }
       const res = await uploadDegreeBatch(filesToUpload, {
         onUploadProgress: (evt) => {
-          if (!evt.total) return;
+          if (!evt.total) {
+            setUploadPhase('uploading');
+            return;
+          }
           const pct = Math.round((evt.loaded / evt.total) * 100);
-          const safePct = Math.min(100, Math.max(0, pct));
-          setUploadProgress(safePct);
-          setUploadPhase(safePct >= 100 ? 'processing' : 'uploading');
-          
-          // Update upload session with progress
-          uploadSessionRef.current = {
+          const boundedPct = Math.min(100, Math.max(0, pct));
+          const displayPct = boundedPct === 0 && evt.loaded > 0 ? 1 : boundedPct;
+
+          setUploadProgress(displayPct);
+          setUploadPhase(displayPct >= 100 ? 'processing' : 'uploading');
+
+          const sessionUpdate = {
             ...(uploadSessionRef.current || {}),
-            status: safePct >= 100 ? 'processing' : 'uploading',
-            progress: safePct,
+            status: displayPct >= 100 ? 'processing' : 'uploading',
+            progress: displayPct,
+            lastUpdated: Date.now(),
           };
-          
+          uploadSessionRef.current = sessionUpdate;
+
           try {
-            localStorage.setItem(UPLOAD_SESSION_KEY, JSON.stringify(uploadSessionRef.current));
+            localStorage.setItem(UPLOAD_SESSION_KEY, JSON.stringify(sessionUpdate));
           } catch (err) {
             console.warn('Failed to save upload session:', err);
           }
-          uploadSessionRef.current = {
-            ...(uploadSessionRef.current || {}),
-            status: safePct >= 100 ? 'processing' : 'uploading',
-            progress: safePct,
-          };
-          try {
-            localStorage.setItem(UPLOAD_SESSION_KEY, JSON.stringify(uploadSessionRef.current));
-          } catch {}
         }
       });
       const raw = res?.data || { success: true };
@@ -720,6 +774,19 @@ const Templates = () => {
       
       updateProcessingStats(initialStats);
       fallbackStatsRef.current = { ...initialStats };
+      setUploadResult({
+        data: {
+          total: totalFromSummary,
+          success: successFromSummary,
+          failed: failedFromSummary,
+          skipped: skippedFromSummary,
+          certificateSummary: norm.certificateSummary,
+          result: norm.result,
+          errors: norm.errors,
+        },
+        message: norm.message || raw?.message || '',
+        success: raw?.success ?? true,
+      });
       
       // Update session with batch ID and processing state
       const updatedSession = {
@@ -796,6 +863,7 @@ const Templates = () => {
       } else {
         startDiscoveryPolling(uploadStart);
       }
+      succeeded = true;
     } catch (err) {
       console.error('Upload failed:', err);
       const normalized = normalizeUploadError(err);
@@ -810,17 +878,6 @@ const Templates = () => {
         updateProcessingStats(null);
         uploadSessionRef.current = null;
         try { localStorage.removeItem(UPLOAD_SESSION_KEY); } catch {}
-      }
-      if (succeeded) {
-        setTimeout(() => {
-          stopBatchPolling();
-          setUploading(false);
-          setUploadPhase(null);
-          setUploadProgress(0);
-          updateProcessingStats(null);
-          uploadSessionRef.current = null;
-          try { localStorage.removeItem(UPLOAD_SESSION_KEY); } catch {}
-        }, 1200);
       }
     }
   };
@@ -874,6 +931,30 @@ const Templates = () => {
 
   return (
     <Layout>
+      {toast && (
+        <div className="pointer-events-none fixed inset-x-0 top-4 z-50 flex justify-center px-4">
+          <div
+            className={`pointer-events-auto flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm shadow-lg transition ${toast.type === 'success'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+              : 'border-red-200 bg-red-50 text-red-700'
+            }`}
+          >
+            <span
+              className={`h-2.5 w-2.5 rounded-full ${toast.type === 'success' ? 'bg-emerald-500' : 'bg-red-500'}`}
+            />
+            <div className="flex-1 font-medium">
+              {toast.message}
+            </div>
+            <button
+              type="button"
+              onClick={dismissToast}
+              className="ml-2 text-sm font-semibold text-current/80 transition hover:text-current"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
       <div className="relative">
         <div className="pointer-events-none absolute inset-0 -z-10">
           <div className="absolute -top-32 left-16 h-72 w-72 rounded-full bg-[#14B87D]/15 blur-3xl" />
@@ -927,28 +1008,10 @@ const Templates = () => {
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.6fr_1fr]">
             <div className="relative overflow-hidden rounded-3xl border border-gray-200 bg-white/95 p-6 shadow-sm backdrop-blur">
-              {uploading && (
-                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-3xl bg-white/70 px-6 backdrop-blur-sm">
-                  <div className="w-full max-w-xs">
-                    <ProgressBar
-                      value={uploadProgress}
-                      label={
-                        uploadPhase === 'processing'
-                          ? (() => {
-                              const total = processingStats?.total;
-                              const processed = processingStats?.processed;
-                              if (total && processed >= 0) {
-                                const pct = Math.min(100, Math.max(0, Math.round((Math.min(processed, total) / total) * 100)));
-                                return `Processing ${processed}/${total} records (${pct}%)…`;
-                              }
-                              return 'Processing uploaded records…';
-                            })()
-                          : uploadPhase === 'completed'
-                            ? 'Finalizing upload'
-                            : 'Uploading files…'
-                      }
-                    />
-                  </div>
+              {uploading && uploadPhase !== 'completed' && (
+                <div className="flex items-center gap-3 rounded-2xl border border-[#14B87D]/30 bg-[#ecfdf5] px-4 py-3 text-sm text-[#065f46]">
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#14B87D]/60 border-t-transparent" />
+                  <span>{uploadPhase === 'processing' ? 'Processing uploaded degrees…' : 'Uploading files…'}</span>
                 </div>
               )}
 
