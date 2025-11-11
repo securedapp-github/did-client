@@ -240,27 +240,27 @@ const Dashboard = () => {
   }, [fetchDegrees]);
 
   const metricCards = [
-    {
-      label: "Total degrees issued",
-      value: stats?.totalDegrees ?? degrees?.length ?? 0,
-      helper: `${formatNumber(degrees?.length ?? 0)} records synced`,
-      icon: ChartBarIcon,
-      accent: "bg-[#14B87D]/15 text-[#0b1d19]",
-    },
-    {
-      label: "Templates downloaded",
-      value: Math.max(stats?.templatesDownloaded ?? 0, downloadCount),
-      helper: "Includes dashboard & local template pulls",
-      icon: DocumentArrowDownIcon,
-      accent: "bg-[#14B87D]/10 text-[#14B87D]",
-    },
     // {
-    //   label: "Pending verifications",
-    //   value: stats?.pendingVerifications ?? 0,
-    //   helper: `${formatNumber(stats?.totalVerifications ?? 0)} completed overall`,
-    //   icon: ShieldCheckIcon,
-    //   accent: "bg-amber-100 text-amber-600",
+    //   label: "Total degrees issued",
+    //   value: stats?.totalDegrees ?? degrees?.length ?? 0,
+    //   helper: `${formatNumber(degrees?.length ?? 0)} records synced`,
+    //   icon: ChartBarIcon,
+    //   accent: "bg-[#14B87D]/15 text-[#0b1d19]",
     // },
+    // {
+    //   label: "Templates downloaded",
+    //   value: Math.max(stats?.templatesDownloaded ?? 0, downloadCount),
+    //   helper: "Includes dashboard & local template pulls",
+    //   icon: DocumentArrowDownIcon,
+    //   accent: "bg-[#14B87D]/10 text-[#14B87D]",
+    // },
+    // // {
+    // //   label: "Pending verifications",
+    // //   value: stats?.pendingVerifications ?? 0,
+    // //   helper: `${formatNumber(stats?.totalVerifications ?? 0)} completed overall`,
+    // //   icon: ShieldCheckIcon,
+    // //   accent: "bg-amber-100 text-amber-600",
+    // // },
   ];
 
   const pendingCount = stats?.pendingVerifications ?? 0;
@@ -333,8 +333,8 @@ const Dashboard = () => {
                       <p className="mt-2 text-2xl font-bold text-gray-900">{formatNumber(stats?.totalDegrees ?? degrees?.length ?? 0)}</p>
                     </div>
                     <div className="rounded-2xl border border-white/60 bg-white/80 p-4 text-center shadow-sm">
-                      <p className="text-xs uppercase tracking-wide text-gray-500">Active verification queue</p>
-                      <p className="mt-2 text-2xl font-bold text-gray-900">{formatNumber(pendingCount)}</p>
+                      <p className="text-xs uppercase tracking-wide text-gray-500">Templates Downloaded</p>
+                      <p className="mt-2 text-2xl font-bold text-gray-900">{formatNumber( Math.max(stats?.templatesDownloaded ?? 0, downloadCount))}</p>
                     </div>
                   </div>
                 </div>
