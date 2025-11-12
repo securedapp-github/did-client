@@ -6,6 +6,7 @@ import { ChartBarIcon, ClockIcon, FunnelIcon } from "@heroicons/react/24/outline
 
 const Dashboard = () => {
   const [degrees, setDegrees] = useState([]);
+
   const [loading, setLoading] = useState(true);
   const [fetchProgress, setFetchProgress] = useState(null);
   const [error, setError] = useState(null);
@@ -23,104 +24,152 @@ const Dashboard = () => {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  const normalizeDegreeRow = useCallback((raw) => {
-    if (!raw || typeof raw !== "object") return {};
+  const getName = (d) =>
+    d?.student_name ||
+    d?.studentName ||
+    d?.name ||
+    d?.recipient_name ||
+    d?.recipientName ||
+    d?.full_name ||
+    d?.fullName ||
+    "";
 
-    const registrationNumber =
-      raw.registration_number ||
-      raw.registrationNumber ||
-      raw.register_number ||
-      raw.registerNumber ||
-      raw.reg_no ||
-      raw.regNo ||
-      raw.rollNo ||
-      raw.roll ||
-      raw.roll_no ||
-      raw.degree_id ||
-      raw.degreeId ||
-      "";
+  const getEmail = (d) =>
+    d?.email ||
+    d?.student_email ||
+    d?.studentEmail ||
+    d?.recipient_email ||
+    d?.recipientEmail ||
+    "";
 
-    const degreeId = raw.degree_id || raw.degreeId || raw.id || "";
-    const batchName = raw.batch_name || raw.batchName || raw.batch || "";
-    const issueDate =
-      raw.issueDate ||
-      raw.createdAt ||
-      raw.updatedAt ||
-      raw.created_at ||
-      raw.updated_at ||
-      null;
+  const getRegistrationNumber = (d) =>
+    d?.registration_number ||
+    d?.registrationNumber ||
+    d?.register_number ||
+    d?.registerNumber ||
+    d?.reg_no ||
+    d?.regNo ||
+    d?.rollNo ||
+    d?.roll_no ||
+    d?.roll ||
+    "";
 
-    let yearValue =
-      raw.year ||
-      raw.batch_year ||
-      raw.batchYear ||
-      raw.graduation_year ||
-      raw.graduationYear ||
-      "";
+  const getStatus = (d) =>
+    d?.verification_status ||
+    d?.status ||
+    d?.upload_status ||
+    d?.state ||
+    "";
 
-    if (!yearValue && typeof batchName === "string") {
-      const match = batchName.match(/(20\d{2}|19\d{2})/);
-      if (match) yearValue = match[1];
+  const getProgram = (d) =>
+    d?.course ||
+    d?.course_name ||
+    d?.courseName ||
+    d?.program ||
+    d?.programName ||
+    d?.program_name ||
+    d?.program_major ||
+    "";
+
+  const getYear = (d) =>
+    d?.year ||
+    d?.graduation_year ||
+    d?.graduationYear ||
+    d?.passing_year ||
+    d?.passingYear ||
+    d?.batch_year ||
+    d?.batchYear ||
+    d?.batch ||
+    d?.batch_name ||
+    d?.batchName ||
+    "";
+
+  const getDate = (d) =>
+    d?.issueDate ||
+    d?.issuedOn ||
+    d?.issued_at ||
+    d?.issuedAt ||
+    d?.createdAt ||
+    d?.updatedAt ||
+    d?.created_at ||
+    d?.updated_at ||
+    d?.date ||
+    null;
+
+  const getDegreeId = (d) => d?.degree_id || d?.degreeId || d?.id || d?._id || "";
+
+  const getInstitution = (d) =>
+    d?.institution_name ||
+    d?.institutionName ||
+    d?.institution ||
+    d?.organization ||
+    d?.college ||
+    d?.university ||
+    "";
+
+  const getCertificateUrl = (d) =>
+    d?.certificate_url || d?.certificateUrl || d?.ipfs_url || d?.ipfsUrl || d?.url || "";
+
+  const handleViewCertificate = useCallback((url) => {
+    if (!url) return;
+    if (typeof window !== "undefined") {
+      const newWindow = window.open(url, "_blank", "noopener,noreferrer");
+      if (newWindow) newWindow.opener = null;
     }
-
-    if (!yearValue && issueDate) {
-      try {
-        yearValue = new Date(issueDate).getFullYear().toString();
-      } catch {
-        yearValue = "";
-      }
-    }
-
-    return {
-      ...raw,
-      student_name:
-        raw.student_name ||
-        raw.studentName ||
-        raw.recipientName ||
-        raw.name ||
-        "",
-      email:
-        raw.email ||
-        raw.recipientEmail ||
-        raw.studentEmail ||
-        raw.contactEmail ||
-        "",
-      course: raw.course || raw.program || raw.courseName || "",
-      registration_number: registrationNumber,
-      degree_id: degreeId,
-      verification_status: raw.verification_status || raw.status || raw.upload_status || "",
-      issueDate,
-      batch_name: batchName,
-      year: yearValue,
-      institution_name:
-        raw.institution_name ||
-        raw.institutionName ||
-        raw.institution ||
-        raw.organization ||
-        "",
-    };
   }, []);
 
+  const distinctPrograms = useMemo(() => {
+    const unique = new Map();
+    degrees.forEach((d) => {
+      const raw = getProgram(d);
+      if (!raw) return;
+      const value = String(raw).trim();
+      if (!value) return;
+      const key = value.toLowerCase();
+      if (!unique.has(key)) {
+        unique.set(key, value);
+      }
+    });
+    return [
+      "All",
+      ...Array.from(unique.values()).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })),
+    ];
+  }, [degrees]);
+
+  const distinctYears = useMemo(() => {
+    const unique = new Map();
+    degrees.forEach((d) => {
+      const raw = getYear(d);
+      if (!raw) return;
+      const value = String(raw).trim();
+      if (!value) return;
+      const key = value.toLowerCase();
+      if (!unique.has(key)) {
+        unique.set(key, value);
+      }
+    });
+    return [
+      "All",
+      ...Array.from(unique.values()).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })),
+    ];
+  }, [degrees]);
+
   const fetchDegrees = useCallback(async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      setDegrees([]);
-      setError("Sign in to view issued degrees.");
-      setLoading(false);
-      return;
-    }
+    const aggregated = [];
+    const limit = 100;
+    let pageCursor = 1;
+    let totalPages = 1;
 
     setLoading(true);
     setFetchProgress({ current: 0, total: null, currentPage: 0, totalPages: 0 });
     setError(null);
 
-    try {
-      const aggregated = [];
-      const limit = 100;
-      let pageCursor = 1;
-      let totalPages = 1;
-      let totalItems = null;
+    const resolveNumber = (value) => {
+      const num = Number(value);
+      return Number.isFinite(num) && num >= 0 ? num : null;
+    };
 
+    try {
       do {
         const res = await apiGetDegrees(pageCursor, limit);
         let payload = res?.data;
@@ -152,31 +201,34 @@ const Dashboard = () => {
                 : [];
 
         if (Array.isArray(list)) {
-          list.forEach((item) => aggregated.push(normalizeDegreeRow(item)));
+          aggregated.push(...list);
         }
 
         const pagination = envelope?.pagination || envelope?.data?.pagination || {};
-        if (totalItems === null) {
-          const totalValue = Number(pagination?.total);
-          if (Number.isFinite(totalValue)) {
-            totalItems = totalValue;
-          }
-        }
-        const pagesValue = Number(
-          pagination?.total_pages ?? pagination?.totalPages ?? pagination?.pages,
-        );
-        if (Number.isFinite(pagesValue) && pagesValue > 0) {
-          totalPages = pagesValue;
-        } else if (Number.isFinite(pagination?.total)) {
-          const computed = Math.ceil(Number(pagination.total) / limit);
-          if (Number.isFinite(computed) && computed > 0) {
-            totalPages = computed;
-          }
+        const resolvedTotal =
+          resolveNumber(pagination?.total) ??
+          resolveNumber(pagination?.totalItems) ??
+          resolveNumber(pagination?.total_records) ??
+          resolveNumber(pagination?.totalRecords) ??
+          resolveNumber(pagination?.count) ??
+          null;
+
+        const resolvedPageCount =
+          resolveNumber(pagination?.total_pages) ??
+          resolveNumber(pagination?.totalPages) ??
+          resolveNumber(pagination?.pages) ??
+          resolveNumber(pagination?.pageCount) ??
+          null;
+
+        if (resolvedPageCount && resolvedPageCount > 0) {
+          totalPages = resolvedPageCount;
+        } else if (!Array.isArray(list) || list.length < limit) {
+          totalPages = pageCursor;
         }
 
         setFetchProgress({
           current: aggregated.length,
-          total: totalItems,
+          total: resolvedTotal && resolvedTotal >= aggregated.length ? resolvedTotal : null,
           currentPage: pageCursor,
           totalPages,
         });
@@ -186,79 +238,19 @@ const Dashboard = () => {
 
       setDegrees(aggregated);
     } catch (err) {
-      console.error("Failed to fetch degrees:", err);
-      const msg =
-        err?.response?.data?.message ||
-        err?.message ||
-        "Failed to fetch degrees.";
-      setError(msg);
+      console.error("Failed to load degrees", err);
+      const message = err?.response?.data?.message || err?.message || "Unable to fetch degrees. Please try again.";
+      setError(message);
       setDegrees([]);
-      setFetchProgress(null);
     } finally {
       setLoading(false);
       setFetchProgress(null);
     }
-  }, [normalizeDegreeRow]);
+  }, [apiGetDegrees]);
 
   useEffect(() => {
     fetchDegrees();
   }, [fetchDegrees]);
-
-  // Derive distinct options
-  const distinctPrograms = useMemo(() => {
-    const s = new Set();
-    degrees.forEach((d) => s.add((d && (d.course || d.program || d.courseName)) || ""));
-    return ["All", ...Array.from(s).filter(Boolean)];
-  }, [degrees]);
-  const distinctYears = useMemo(() => {
-    const s = new Set();
-    degrees.forEach((d) => s.add((d && (d.year || d.batch || d.batchName || d.batch_name)) || ""));
-    return ["All", ...Array.from(s).filter(Boolean)];
-  }, [degrees]);
-
-  // Normalize helpers
-  const getName = (d) => d.student_name || d.studentName || d.recipientName || d.name || "";
-  const getEmail = (d) => d.email || d.recipientEmail || d.studentEmail || d.contactEmail || "";
-  const getProgram = (d) => d.course || d.program || d.courseName || "";
-  const getRegistrationNumber = (d) => {
-    // Common explicit aliases
-    const val = d.registration_number || d.registrationNumber || d.register_number || d.registerNumber || d.reg_no || d.regNo || d.rollNo || d.roll || d.roll_no || d.degree_id || d.degreeId || "";
-    if (val) return val;
-    // Fallback: scan keys case-insensitively for likely registration fields
-    try {
-      const k = Object.keys(d || {}).find((key) => /reg(istration)?[_\s-]*no|reg(istration)?[_\s-]*number|register[_\s-]*number|registration[_\s-]*id|roll[_\s-]*no|roll/i.test(key));
-      if (k && d[k]) return d[k];
-    } catch {}
-    return "";
-  };
-  const getStatus = (d) => {
-    const s = d.status || d.verification_status || d.upload_status || "Issued";
-    if (/completed|issued/i.test(String(s))) return "Issued";
-    if (/pending/i.test(String(s))) return "Pending";
-    if (/fail/i.test(String(s))) return "Failed";
-    return String(s);
-  };
-  const getDate = (d) => d.issueDate || d.createdAt || d.updatedAt || d.created_at || d.updated_at || null;
-  const getYear = (d) => {
-    const y = d.year || d.batch || d.batchName || d.batch_name;
-    if (y) return y;
-    // Try deriving year from date
-    const dt = getDate(d);
-    if (dt) try { return new Date(dt).getFullYear(); } catch {}
-    // Try parsing year-like token from batch_name
-    if (typeof d?.batch_name === 'string') {
-      const m = d.batch_name.match(/(20\d{2}|19\d{2})/);
-      if (m) return m[1];
-    }
-    return "";
-  };
-  const getDegreeId = (d) => d.degree_id || d.degreeId || "";
-  const getInstitution = (d) =>
-    d.institution_name ||
-    d.institutionName ||
-    d.institution ||
-    d.organization ||
-    "";
 
   // Filtered + sorted list
   const processed = useMemo(() => {
@@ -560,6 +552,7 @@ const Dashboard = () => {
                     <th className="py-2 cursor-pointer" onClick={() => toggleSort('year')}>Year</th>
                     <th className="py-2 cursor-pointer" onClick={() => toggleSort('institution')}>Institution</th>
                     <th className="py-2 cursor-pointer" onClick={() => toggleSort('date')}>Date</th>
+                    <th className="py-2">Certificate</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -573,6 +566,18 @@ const Dashboard = () => {
                         <td className="py-3 text-gray-700">{getYear(d) || '—'}</td>
                         <td className="py-3 text-gray-700">{getInstitution(d) || '—'}</td>
                         <td className="py-3 text-gray-700">{getDate(d) ? new Date(getDate(d)).toLocaleDateString() : '—'}</td>
+                        <td className="py-3">
+                          {getCertificateUrl(d) ? (
+                            <button
+                              onClick={() => handleViewCertificate(getCertificateUrl(d))}
+                              className="text-sm font-medium text-[#14B87D] hover:text-[#0d8a5a]"
+                            >
+                              View Certificate
+                            </button>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
+                        </td>
                       </tr>
                     ))
                   ) : (
@@ -623,6 +628,7 @@ const Dashboard = () => {
           </div>
         </div>
       </div>
+
     </Layout>
   );
 }
